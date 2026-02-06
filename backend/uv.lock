@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -280,7 +280,7 @@ wheels = [
 
 [[package]]
 name = "browser-use"
-version = "0.11.8"
+version = "0.11.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -321,9 +321,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid7" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/82/ce535edeae6d008c537bf816d9f5536cbc1fc0b45b5ac34e8380e390693e/browser_use-0.11.8.tar.gz", hash = "sha256:2ab22e35581f1d8cd0561814b8fabe87bcdbc1e4c5dfe56ca0ab19716f1ddbea", size = 563875, upload-time = "2026-02-03T02:01:30.666Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/99/200f7b856f555970eacb8c852f73839e51a7d658c24a7739293e9eee2158/browser_use-0.11.9.tar.gz", hash = "sha256:c3d8a420acf26d26c688c42916358ba546e7159e1a699c06064b899cb7927577", size = 589771, upload-time = "2026-02-06T05:28:51.093Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/66/02c329371cf52fe3c1f3f78f1e45670dbee50ee8387eef6cd3110cddcb0f/browser_use-0.11.8-py3-none-any.whl", hash = "sha256:2a967e0093716184076567103891a707f525a9b4883add082494e42122915f34", size = 675853, upload-time = "2026-02-03T02:01:28.452Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/3c/f8630cf1b6bc9a95d6e1c974a5cf8eefdc3bbcba5d4a903f7cd722f4fb95/browser_use-0.11.9-py3-none-any.whl", hash = "sha256:a66accf4dded24d056eb2733e354e159fd7d82cab986d75dc0f14b395467c82c", size = 699820, upload-time = "2026-02-06T05:28:52.851Z" },
 ]
 
 [[package]]

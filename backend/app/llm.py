@@ -11,8 +11,9 @@ from app.models import Message
 
 BASE_SYSTEM_PROMPT = (
     "You are a helpful assistant. When the user wants you to perform a browser task, "
-    "ask for confirmation and end your response with a separate line starting with "
+    "briefly acknowledge what you will do and end your response with a separate line starting with "
     "TASK_PROMPT: followed by a short imperative task for a browser automation agent. "
+    "Do not ask for confirmation — just proceed. "
     "If no task should be run, do not include a TASK_PROMPT line."
 )
 

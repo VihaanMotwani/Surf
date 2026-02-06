@@ -42,6 +42,7 @@ async def create_task(db: AsyncSession, session: Session, prompt: str) -> Task:
     session.status = "task_running"
     session.pending_task_prompt = None
     db.add(task)
+    await db.flush()  # Generate task.id before referencing it
     db.add(TaskEvent(task_id=task.id, type="status", payload={"status": "queued"}))
     await db.commit()
     await db.refresh(task)

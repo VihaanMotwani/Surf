@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.conversation import handle_user_message, maybe_handle_confirmation
+from app.conversation import handle_user_message, check_task_running
 from app.crud import add_message, create_session, get_session, list_messages
 from app.db import AsyncSessionLocal, get_db
 from app.llm import TASK_PROMPT_MARKERS, client as openai_client, parse_task_prompt, stream_assistant_text
@@ -92,13 +92,13 @@ async def add_message_stream_endpoint(
     if zep:
         zep.add_message("user", payload.content)
 
-    maybe_response = await maybe_handle_confirmation(db, session, payload.content)
-    if maybe_response:
-        async def confirmation_stream():
-            yield f"data: {json.dumps({'type': 'message', 'text': maybe_response.assistant_message.content})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'task_id': str(maybe_response.task_id) if maybe_response.task_id else None})}\n\n"
+    running = await check_task_running(db, session)
+    if running:
+        async def busy_stream():
+            yield f"data: {json.dumps({'type': 'message', 'text': running.assistant_message.content})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'task_id': None})}\n\n"
 
-        return StreamingResponse(confirmation_stream(), media_type="text/event-stream")
+        return StreamingResponse(busy_stream(), media_type="text/event-stream")
 
     # Fetch Zep context for LLM enrichment
     memory_context = zep.get_context() if zep else ""
@@ -172,23 +172,20 @@ async def add_message_stream_endpoint(
 
                 task_id = None
                 async with AsyncSessionLocal() as db2:
-                    async with db2.begin():
-                        session_row = await db2.get(SessionModel, str(session_id))
-                        if session_row:
-                            if task_prompt:
-                                # Auto-execute browser task without confirmation
-                                from app.crud import create_task
-                                from app.task_executor import execute_task_background
+                    session_row = await db2.get(SessionModel, str(session_id))
+                    if session_row:
+                        if task_prompt:
+                            from app.crud import create_task
+                            from app.task_executor import execute_task_background
 
-                                task = await create_task(db2, session_row, task_prompt)
-                                task_id = task.id
-                                session_row.status = "task_running"
-                                session_row.pending_task_prompt = None
-                            else:
-                                session_row.status = "idle"
-                                session_row.pending_task_prompt = None
+                            task = await create_task(db2, session_row, task_prompt)
+                            task_id = task.id
+                        else:
+                            session_row.status = "idle"
+                            session_row.pending_task_prompt = None
+                            await db2.commit()
 
-                        msg = await add_message(db2, session_id, "assistant", assistant_text)
+                    msg = await add_message(db2, session_id, "assistant", assistant_text)
 
                 # Yield done event BEFORE starting background task
                 yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
@@ -204,10 +201,15 @@ async def add_message_stream_endpoint(
 
 async def _transcribe(file: UploadFile) -> str:
     """Transcribe an uploaded audio file via OpenAI Whisper."""
+    # Read file content before passing to thread — SpooledTemporaryFile can't cross threads safely
+    content = await file.read()
+    filename = file.filename or "audio.webm"
+    content_type = file.content_type or "audio/webm"
+
     transcript = await asyncio.to_thread(
         lambda: openai_client.audio.transcriptions.create(
             model="whisper-1",
-            file=(file.filename or "audio.webm", file.file, file.content_type or "audio/webm"),
+            file=(filename, content, content_type),
         )
     )
     return transcript.text
@@ -254,14 +256,14 @@ async def add_audio_message_stream_endpoint(
     if zep:
         zep.add_message("user", transcription)
 
-    maybe_response = await maybe_handle_confirmation(db, session, transcription)
-    if maybe_response:
-        async def confirmation_stream():
+    running = await check_task_running(db, session)
+    if running:
+        async def busy_stream():
             yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
-            yield f"data: {json.dumps({'type': 'message', 'text': maybe_response.assistant_message.content})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'task_id': str(maybe_response.task_id) if maybe_response.task_id else None})}\n\n"
+            yield f"data: {json.dumps({'type': 'message', 'text': running.assistant_message.content})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'task_id': None})}\n\n"
 
-        return StreamingResponse(confirmation_stream(), media_type="text/event-stream")
+        return StreamingResponse(busy_stream(), media_type="text/event-stream")
 
     # Fetch Zep context for LLM enrichment
     memory_context = zep.get_context() if zep else ""
@@ -337,23 +339,20 @@ async def add_audio_message_stream_endpoint(
 
                 task_id = None
                 async with AsyncSessionLocal() as db2:
-                    async with db2.begin():
-                        session_row = await db2.get(SessionModel, str(session_id))
-                        if session_row:
-                            if task_prompt:
-                                # Auto-execute browser task without confirmation
-                                from app.crud import create_task
-                                from app.task_executor import execute_task_background
+                    session_row = await db2.get(SessionModel, str(session_id))
+                    if session_row:
+                        if task_prompt:
+                            from app.crud import create_task
+                            from app.task_executor import execute_task_background
 
-                                task = await create_task(db2, session_row, task_prompt)
-                                task_id = task.id
-                                session_row.status = "task_running"
-                                session_row.pending_task_prompt = None
-                            else:
-                                session_row.status = "idle"
-                                session_row.pending_task_prompt = None
+                            task = await create_task(db2, session_row, task_prompt)
+                            task_id = task.id
+                        else:
+                            session_row.status = "idle"
+                            session_row.pending_task_prompt = None
+                            await db2.commit()
 
-                        msg = await add_message(db2, session_id, "assistant", assistant_text)
+                    msg = await add_message(db2, session_id, "assistant", assistant_text)
 
                 # Yield done event BEFORE starting background task
                 yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
