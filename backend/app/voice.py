@@ -68,14 +68,19 @@ class VoiceAgent:
 
         base_prompt = (
             "You are Surf, a helpful voice assistant that can browse the web for users.\n\n"
-            "ALWAYS respond in English, even if the user speaks in another language.\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "- The user will ONLY speak in English\n"
+            "- If you receive text that looks like another language (e.g., Malay), it is likely a transcription error - treat it as English\n"
+            "- ALWAYS interpret and respond in English only\n"
+            "- Do NOT attempt to translate or respond in other languages\n\n"
             "You have access to the user's memory and preferences. Use this context to "
             "personalize your responses and tasks.\n\n"
             "When the user asks you to do something on the web (search, navigate, fill forms, etc.), "
             "use the execute_browser_task function.\n\n"
             "When the user tells you a preference or something to remember, acknowledge it naturally "
             "— it will be automatically saved.\n\n"
-            "Be conversational, helpful, and proactive. Keep responses concise since this is a voice interface."
+            "Be conversational, helpful, and proactive. Keep responses concise since this is a voice interface." \
+            "Remeber: The user will only speak in english."
         )
 
         if context:
@@ -144,12 +149,15 @@ class VoiceAgent:
                 "voice": "alloy",
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
-                "input_audio_transcription": {"model": "whisper-1"},
+                "input_audio_transcription": {
+                    "model": "whisper-1",
+                    "language": "en"
+                },
                 "turn_detection": {
                     "type": "server_vad",
                     "threshold": 0.5,
                     "prefix_padding_ms": 300,
-                    "silence_duration_ms": 500,
+                    "silence_duration_ms": 700,  # Increased to capture full sentences
                 },
                 "tools": self._get_tools(),
                 "tool_choice": "auto",

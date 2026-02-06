@@ -398,6 +398,7 @@ async def _transcribe(file: UploadFile) -> str:
     transcript = await asyncio.to_thread(
         lambda: openai_client.audio.transcriptions.create(
             model="whisper-1",
+            language="en",
             file=(filename, content, content_type),
         )
     )
