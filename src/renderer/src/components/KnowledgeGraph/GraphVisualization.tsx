@@ -8,7 +8,7 @@ import { circular } from 'graphology-layout'
 export function GraphVisualization() {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
-  const { graphData, setSelectedNode } = useGraphStore()
+  const { graphData, setSelectedNode, selectedNode } = useGraphStore()
   const { theme } = useSettingsStore()
 
   useEffect(() => {
@@ -74,6 +74,12 @@ export function GraphVisualization() {
         const nodeData = graphData.nodes.find((n) => n.id === node)
         if (nodeData) {
           setSelectedNode(nodeData)
+          // Highlight selected node
+          graph.forEachNode((n) => {
+            graph.setNodeAttribute(n, 'size', graphData.nodes.find(nd => nd.id === n)?.size || 15)
+          })
+          graph.setNodeAttribute(node, 'size', 25)
+          sigma.refresh()
         }
       })
 
@@ -81,14 +87,12 @@ export function GraphVisualization() {
       sigma.on('enterNode', ({ node }) => {
         const nodeDisplayData = sigma.getNodeDisplayData(node)
         if (nodeDisplayData) {
-          sigma.getGraph().setNodeAttribute(node, 'highlighted', true)
-          sigma.refresh()
+          containerRef.current!.style.cursor = 'pointer'
         }
       })
 
-      sigma.on('leaveNode', ({ node }) => {
-        sigma.getGraph().setNodeAttribute(node, 'highlighted', false)
-        sigma.refresh()
+      sigma.on('leaveNode', () => {
+        containerRef.current!.style.cursor = 'default'
       })
     } catch (error) {
       console.error('Failed to initialize Sigma:', error)
@@ -102,6 +106,35 @@ export function GraphVisualization() {
       }
     }
   }, [graphData, setSelectedNode, theme])
+
+  // Highlight selected node when it changes
+  useEffect(() => {
+    if (!sigmaRef.current || !graphData) return
+
+    const graph = sigmaRef.current.getGraph() as any
+
+    // Reset all node sizes
+    graph.forEachNode((node: string) => {
+      const nodeData = graphData.nodes.find(n => n.id === node)
+      graph.setNodeAttribute(node, 'size', nodeData?.size || 15)
+    })
+
+    // Highlight selected node
+    if (selectedNode) {
+      if (graph.hasNode(selectedNode.id)) {
+        graph.setNodeAttribute(selectedNode.id, 'size', 25)
+
+        // Center camera on selected node
+        const nodeDisplayData = sigmaRef.current.getNodeDisplayData(selectedNode.id)
+        if (nodeDisplayData) {
+          const camera = sigmaRef.current.getCamera()
+          camera.animate({ x: nodeDisplayData.x, y: nodeDisplayData.y }, { duration: 500 })
+        }
+      }
+    }
+
+    sigmaRef.current.refresh()
+  }, [selectedNode, graphData])
 
   return (
     <div
