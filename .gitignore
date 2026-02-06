@@ -1,7 +1,11 @@
 .env
 .venv
 venv
+.python-version
 
+surf.db-shm
+surf.db-wal
+backend.egg-info/
 # Logs
 logs
 *.log
@@ -35,3 +39,19 @@ release/
 
 # Testing
 coverage/
+.coverage
+htmlcov/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# SQLite / local data
+*.db
+*.sqlite
+*.sqlite3

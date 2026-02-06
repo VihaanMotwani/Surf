@@ -1,49 +1,42 @@
 # Backend
 
-Conversational agent backend with Browser-Use task runner. Uses FastAPI, Postgres, and OpenAI.
+Conversational agent backend with Browser-Use task runner. Uses FastAPI, SQLite, and OpenAI.
 
 ## Prerequisites
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - An OpenAI API key
-- Docker (for local Postgres)
 
 ## Setup
 
-1. Start Postgres:
-
-```bash
-cd ..
-docker compose up -d
-```
-
-2. Create a virtualenv and install dependencies:
+1. Create a virtualenv and install dependencies:
 
 ```bash
 cd backend
 uv venv --python 3.11
 source .venv/bin/activate
 uv pip install -r requirements.txt
+uv pip install aiosqlite
 ```
 
-3. Configure environment variables in `backend/.env`:
+2. Configure environment variables in `backend/.env`:
 
 ```
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agentdb
+DATABASE_URL=sqlite+aiosqlite:///./surf.db
 OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-4.1-mini
 BROWSER_USE_API_KEY=your_key
 TASK_POLL_INTERVAL=2.0
 ```
 
-4. Install browser-use browsers (one-time):
+3. Install browser-use browsers (one-time):
 
 ```bash
 uvx browser-use install
 ```
 
-Tables are created automatically on server startup, but the `agentdb` database must exist.
+Tables are created automatically on server startup.
 
 ## Run API
 
@@ -112,7 +105,7 @@ backend/
 ├── app/
 │   ├── main.py          # FastAPI app + lifespan
 │   ├── config.py         # Settings (from .env)
-│   ├── db.py             # Postgres engine + session factory
+│   ├── db.py             # SQLite engine + session factory
 │   ├── models.py         # SQLAlchemy models
 │   ├── schemas.py        # Pydantic request/response schemas
 │   ├── crud.py           # Database operations
