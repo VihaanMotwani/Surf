@@ -1,41 +1,49 @@
 # Backend
 
-Conversational agent backend with Browser-Use task runner. Uses FastAPI, SQLite, and OpenAI.
+Conversational agent backend with Browser-Use task runner. Uses FastAPI, Postgres, and OpenAI.
 
 ## Prerequisites
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - An OpenAI API key
+- Docker (for local Postgres)
 
 ## Setup
 
-1. Create a virtualenv and install dependencies:
+1. Start Postgres:
+
+```bash
+cd ..
+docker compose up -d
+```
+
+2. Create a virtualenv and install dependencies:
 
 ```bash
 cd backend
 uv venv --python 3.11
 source .venv/bin/activate
-uv pip install -e "."
+uv pip install -r requirements.txt
 ```
 
-2. Configure environment variables in `backend/.env`:
+3. Configure environment variables in `backend/.env`:
 
 ```
-DATABASE_URL=sqlite+aiosqlite:///./surf.db
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agentdb
 OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-4.1-mini
 BROWSER_USE_API_KEY=your_key
 TASK_POLL_INTERVAL=2.0
 ```
 
-3. Install browser-use browsers (one-time):
+4. Install browser-use browsers (one-time):
 
 ```bash
 uvx browser-use install
 ```
 
-No database init step needed — tables are created automatically on server startup.
+Tables are created automatically on server startup, but the `agentdb` database must exist.
 
 ## Run API
 
@@ -89,6 +97,14 @@ Event types:
 - `done` — final message with optional `task_prompt`
 - `error` — error message
 
+## Frontend (Local)
+
+The backend serves a simple test UI at:
+
+```
+http://127.0.0.1:8000
+```
+
 ## Project Structure
 
 ```
@@ -96,7 +112,7 @@ backend/
 ├── app/
 │   ├── main.py          # FastAPI app + lifespan
 │   ├── config.py         # Settings (from .env)
-│   ├── db.py             # SQLite engine + session factory
+│   ├── db.py             # Postgres engine + session factory
 │   ├── models.py         # SQLAlchemy models
 │   ├── schemas.py        # Pydantic request/response schemas
 │   ├── crud.py           # Database operations
@@ -111,6 +127,6 @@ backend/
 │   └── runner.py         # Browser-Use agent runner
 ├── scripts/
 │   └── init_db.py        # Manual DB init (optional)
-├── pyproject.toml
+├── requirements.txt
 └── .env
 ```

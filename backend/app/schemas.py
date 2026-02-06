@@ -36,6 +36,10 @@ class ChatResponse(BaseModel):
     task_id: UUID | None = None
 
 
+class AudioChatResponse(ChatResponse):
+    transcription: str
+
+
 class TaskCreateRequest(BaseModel):
     prompt: str | None = None
 

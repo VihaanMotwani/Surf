@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     browser_use_api_key: str | None = None
 
+    # Zep memory (optional — graceful fallback when not set)
+    zep_api_key: str | None = None
+    zep_user_id: str = "surf_local_user"
+    zep_user_name: str = "User"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
