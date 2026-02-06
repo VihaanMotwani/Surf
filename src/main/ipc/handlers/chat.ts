@@ -1,93 +1,117 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../channels'
+import { apiPostStream, apiPostAudioStream } from '../../api'
 
-// TODO: Integrate with actual backend
-// This is a placeholder implementation with mock streaming responses
-
-interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: number
+function sendToRenderer(channel: string, data: unknown): void {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win) win.webContents.send(channel, data)
 }
 
-const chatHistory: ChatMessage[] = []
+function handleSSE(
+  assistantId: string,
+  event: { type: string; [key: string]: unknown }
+): void {
+  if (event.type === 'delta') {
+    sendToRenderer(IPC_CHANNELS.CHAT_STREAM_CHUNK, {
+      id: assistantId,
+      chunk: event.text as string
+    })
+  } else if (event.type === 'message') {
+    // Full message (e.g. confirmation response) — send as single chunk
+    sendToRenderer(IPC_CHANNELS.CHAT_STREAM_CHUNK, {
+      id: assistantId,
+      chunk: event.text as string
+    })
+  } else if (event.type === 'transcription') {
+    sendToRenderer(IPC_CHANNELS.CHAT_TRANSCRIPTION, {
+      text: event.text as string
+    })
+  } else if (event.type === 'done') {
+    sendToRenderer(IPC_CHANNELS.CHAT_STREAM_END, {
+      id: assistantId,
+      taskPrompt: event.task_prompt ?? null,
+      taskId: event.task_id ?? null
+    })
+  } else if (event.type === 'error') {
+    sendToRenderer(IPC_CHANNELS.CHAT_STREAM_ERROR, event.message as string)
+  }
+}
 
 export function registerChatHandlers(): void {
-  // Handle sending a message and returning a streaming response
-  ipcMain.handle(IPC_CHANNELS.CHAT_SEND_MESSAGE, async (event, message: string) => {
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: message,
-      timestamp: Date.now()
+  // Send text message — streams response via SSE events
+  ipcMain.handle(
+    IPC_CHANNELS.CHAT_SEND_MESSAGE,
+    async (_event, sessionId: string, message: string, assistantId?: string) => {
+      const id = assistantId || `assistant-${Date.now()}`
+
+      // Only send STREAM_START if the renderer didn't pre-create the placeholder
+      if (!assistantId) {
+        sendToRenderer(IPC_CHANNELS.CHAT_STREAM_START, id)
+      }
+
+      try {
+        await apiPostStream(
+          `/sessions/${sessionId}/messages/stream`,
+          { content: message },
+          (sseEvent) => handleSSE(id, sseEvent)
+        )
+      } catch (err) {
+        sendToRenderer(
+          IPC_CHANNELS.CHAT_STREAM_ERROR,
+          err instanceof Error ? err.message : 'Failed to send message'
+        )
+      }
+
+      return { id }
     }
+  )
 
-    chatHistory.push(userMessage)
+  // Send audio message — transcribes + streams response via SSE
+  ipcMain.handle(
+    IPC_CHANNELS.CHAT_SEND_AUDIO,
+    async (_event, sessionId: string, audioBuffer: ArrayBuffer, mimeType: string) => {
+      const assistantId = `assistant-${Date.now()}`
+      let streamStartSent = false
 
-    // Simulate streaming response
-    const assistantMessageId = (Date.now() + 1).toString()
-    const fullResponse = generateMockResponse(message)
+      try {
+        await apiPostAudioStream(
+          `/sessions/${sessionId}/messages/audio/stream`,
+          Buffer.from(audioBuffer),
+          mimeType,
+          (sseEvent) => {
+            if (sseEvent.type === 'transcription') {
+              // Send transcription first (creates user message), then STREAM_START (creates assistant placeholder)
+              sendToRenderer(IPC_CHANNELS.CHAT_TRANSCRIPTION, { text: sseEvent.text as string })
+              sendToRenderer(IPC_CHANNELS.CHAT_STREAM_START, assistantId)
+              streamStartSent = true
+            } else {
+              // Ensure assistant placeholder exists before sending chunks
+              if (!streamStartSent) {
+                sendToRenderer(IPC_CHANNELS.CHAT_STREAM_START, assistantId)
+                streamStartSent = true
+              }
+              handleSSE(assistantId, sseEvent)
+            }
+          }
+        )
+      } catch (err) {
+        sendToRenderer(
+          IPC_CHANNELS.CHAT_STREAM_ERROR,
+          err instanceof Error ? err.message : 'Failed to process audio'
+        )
+      }
 
-    // Send stream start event
-    event.sender.send(IPC_CHANNELS.CHAT_STREAM_START, assistantMessageId)
-
-    // Simulate streaming by sending chunks
-    const words = fullResponse.split(' ')
-    for (let i = 0; i < words.length; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 50 + Math.random() * 50))
-      const chunk = (i === 0 ? '' : ' ') + words[i]
-      event.sender.send(IPC_CHANNELS.CHAT_STREAM_CHUNK, {
-        id: assistantMessageId,
-        chunk
-      })
+      return { id: assistantId }
     }
-
-    // Send stream end event
-    event.sender.send(IPC_CHANNELS.CHAT_STREAM_END, assistantMessageId)
-
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: 'assistant',
-      content: fullResponse,
-      timestamp: Date.now()
-    }
-
-    chatHistory.push(assistantMessage)
-
-    return { id: assistantMessageId, message: fullResponse }
-  })
+  )
 
   // Get chat history
   ipcMain.handle(IPC_CHANNELS.CHAT_GET_HISTORY, async () => {
-    return chatHistory
+    return []
   })
 
   // Clear chat history
   ipcMain.handle(IPC_CHANNELS.CHAT_CLEAR_HISTORY, async () => {
-    chatHistory.length = 0
     return { success: true }
   })
-}
-
-function generateMockResponse(userMessage: string): string {
-  const lowerMessage = userMessage.toLowerCase()
-
-  if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-    return "Hello! I'm Surf, your speech-driven web assistant. I'm here to help you browse the web, search for information, and complete tasks using voice commands. How can I assist you today?"
-  }
-
-  if (lowerMessage.includes('search') || lowerMessage.includes('find')) {
-    return "I'd be happy to help you search for that. In the full version, I would open a browser and perform the search using automated browsing. For now, this is a UI demo showing how the conversation interface works with streaming responses."
-  }
-
-  if (lowerMessage.includes('weather')) {
-    return "To check the weather, I would navigate to a weather website and extract the current conditions for your location. The browser automation system would handle clicking through any pop-ups and finding the relevant information for you."
-  }
-
-  if (lowerMessage.includes('email') || lowerMessage.includes('mail')) {
-    return "I can help you with email tasks! In the full implementation, I would be able to log into your email, read messages, compose replies, and organize your inbox - all while you use voice commands to guide the process."
-  }
-
-  return `I understand you said: "${userMessage}". This is a demonstration of the Surf UI with streaming responses. In the full version, I would process your request using browser automation, navigate websites as needed, and help you complete the task using voice interaction throughout the process.`
 }

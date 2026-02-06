@@ -9,7 +9,7 @@ export function useIPC() {
 export function useStreamingMessages(
   onStart: (messageId: string) => void,
   onChunk: (data: { id: string; chunk: string }) => void,
-  onEnd: (messageId: string) => void,
+  onEnd: (data: { id: string; taskPrompt: string | null; taskId: string | null }) => void,
   onError?: (error: string) => void
 ) {
   const electron = useIPC()

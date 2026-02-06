@@ -4,17 +4,20 @@ import { ChatMessage } from '@/lib/types'
 interface ChatState {
   messages: ChatMessage[]
   isLoading: boolean
+  sessionId: string | null
   addMessage: (message: ChatMessage) => void
   updateMessage: (id: string, content: string) => void
   appendToMessage: (id: string, chunk: string) => void
   setStreamingStatus: (id: string, isStreaming: boolean) => void
   clearMessages: () => void
   setLoading: (isLoading: boolean) => void
+  setSessionId: (id: string | null) => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isLoading: false,
+  sessionId: null,
 
   addMessage: (message) =>
     set((state) => ({
@@ -42,7 +45,8 @@ export const useChatStore = create<ChatState>((set) => ({
       )
     })),
 
-  clearMessages: () => set({ messages: [] }),
+  clearMessages: () => set({ messages: [], sessionId: null }),
 
-  setLoading: (isLoading) => set({ isLoading })
+  setLoading: (isLoading) => set({ isLoading }),
+  setSessionId: (sessionId) => set({ sessionId })
 }))

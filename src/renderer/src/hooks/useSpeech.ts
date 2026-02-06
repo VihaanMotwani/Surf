@@ -96,29 +96,71 @@ export function useSpeech() {
   }
 }
 
-// Hook for speech recognition (placeholder)
-export function useSpeechRecognition() {
-  const [isListening, setIsListening] = useState(false)
-  const [transcript, _setTranscript] = useState('')
+// Hook for audio recording via MediaRecorder (sends to backend for Whisper transcription)
+export function useAudioRecorder() {
+  const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
 
-  const start = useCallback(async () => {
-    // TODO: Implement actual speech-to-text
-    // For now, show a placeholder message
-    console.log('Speech recognition not yet implemented')
-    return {
-      success: false,
-      error: 'Speech-to-text not yet implemented'
+  const startRecording = useCallback(async (): Promise<boolean> => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4'
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      mediaRecorderRef.current = mediaRecorder
+      chunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.start(100)
+      setIsRecording(true)
+      return true
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+      return false
     }
   }, [])
 
-  const stop = useCallback(() => {
-    setIsListening(false)
-  }, [])
+  const stopRecording = useCallback(
+    async (): Promise<{ buffer: ArrayBuffer; mimeType: string } | null> => {
+      return new Promise((resolve) => {
+        const mediaRecorder = mediaRecorderRef.current
+        if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+          setIsRecording(false)
+          resolve(null)
+          return
+        }
 
-  return {
-    start,
-    stop,
-    isListening,
-    transcript
-  }
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType })
+          const buffer = await blob.arrayBuffer()
+          mediaRecorder.stream.getTracks().forEach((track) => track.stop())
+          setIsRecording(false)
+          resolve({ buffer, mimeType: mediaRecorder.mimeType })
+        }
+
+        mediaRecorder.stop()
+      })
+    },
+    []
+  )
+
+  return { isRecording, startRecording, stopRecording }
+}
+
+// Placeholder for speech recognition (kept for backwards compat)
+export function useSpeechRecognition() {
+  const [isListening] = useState(false)
+  const [transcript] = useState('')
+  const start = useCallback(async () => ({ success: false, error: 'Use useAudioRecorder instead' }), [])
+  const stop = useCallback(() => {}, [])
+  return { start, stop, isListening, transcript }
 }

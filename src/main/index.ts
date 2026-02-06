@@ -1,9 +1,17 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
 
 function createWindow(): void {
+  // Grant microphone permissions so MediaRecorder works
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(['media', 'mediaKeySystem', 'audioCapture'].includes(permission))
+  })
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    return ['media', 'mediaKeySystem', 'audioCapture'].includes(permission)
+  })
+
   // Create the browser window
   const mainWindow = new BrowserWindow({
     width: 1400,

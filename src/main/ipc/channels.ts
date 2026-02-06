@@ -3,10 +3,12 @@
 export const IPC_CHANNELS = {
   // Chat channels
   CHAT_SEND_MESSAGE: 'chat:send-message',
+  CHAT_SEND_AUDIO: 'chat:send-audio',
   CHAT_STREAM_START: 'chat:stream-start',
   CHAT_STREAM_CHUNK: 'chat:stream-chunk',
   CHAT_STREAM_END: 'chat:stream-end',
   CHAT_STREAM_ERROR: 'chat:stream-error',
+  CHAT_TRANSCRIPTION: 'chat:transcription',
   CHAT_GET_HISTORY: 'chat:get-history',
   CHAT_CLEAR_HISTORY: 'chat:clear-history',
 
@@ -17,6 +19,7 @@ export const IPC_CHANNELS = {
   GRAPH_SEARCH: 'graph:search',
 
   // Session channels
+  SESSION_CREATE: 'session:create',
   SESSION_GET_ALL: 'session:get-all',
   SESSION_GET_BY_ID: 'session:get-by-id',
   SESSION_RESUME: 'session:resume',
@@ -34,4 +37,4 @@ export const IPC_CHANNELS = {
   SETTINGS_UPDATE: 'settings:update'
 } as const
 
-export type IpcChannels = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS]
+export type IpcChannels = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
