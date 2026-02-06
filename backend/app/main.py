@@ -10,6 +10,7 @@ from app.db import init_db
 from app.routes.health import router as health_router
 from app.routes.sessions import router as sessions_router
 from app.routes.tasks import router as tasks_router
+from app.routes.knowledge_graph import router as kg_router
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ app = FastAPI(title="Browser-Use Chat Backend", version="0.1.0", lifespan=lifesp
 app.include_router(health_router)
 app.include_router(sessions_router)
 app.include_router(tasks_router)
+app.include_router(kg_router)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"

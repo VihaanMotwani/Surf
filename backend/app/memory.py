@@ -147,3 +147,29 @@ def create_memory(api_key: str | None, user_id: str = "surf_local_user", user_na
     except Exception as e:
         logger.warning(f"Failed to initialize Zep memory: {e}")
         return None
+
+
+# Global memory instance for API routes
+_memory_instance: Optional[ZepMemory] = None
+
+
+def get_memory_client() -> ZepMemory:
+    """
+    Get the global memory client instance for API routes.
+
+    Raises:
+        RuntimeError: If Zep is not configured
+    """
+    global _memory_instance
+
+    if _memory_instance is None:
+        api_key = os.environ.get("ZEP_API_KEY")
+        user_id = os.environ.get("ZEP_USER_ID", "surf_local_user")
+        user_name = os.environ.get("ZEP_USER_NAME", "User")
+
+        _memory_instance = create_memory(api_key, user_id, user_name)
+
+    if _memory_instance is None:
+        raise RuntimeError("Zep memory is not configured. Set ZEP_API_KEY environment variable.")
+
+    return _memory_instance

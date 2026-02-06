@@ -79,164 +79,41 @@ async def add_message_stream_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    from app.conversation import _get_zep
+
     session = await get_session(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     await add_message(db, session.id, "user", payload.content)
 
+    # Store user message in Zep
+    zep = _get_zep()
+    if zep:
+        zep.add_message("user", payload.content)
+
     maybe_response = await maybe_handle_confirmation(db, session, payload.content)
     if maybe_response:
         async def confirmation_stream():
-            yield f"data: {json.dumps({'type': 'message', 'text': maybe_response.assistant_message.content})}\\n\\n"
-            yield f"data: {json.dumps({'type': 'done', 'task_id': str(maybe_response.task_id) if maybe_response.task_id else None})}\\n\\n"
-
-        return StreamingResponse(confirmation_stream(), media_type="text/event-stream")
-
-    messages = await list_messages(db, session.id)
-
-    marker_max_len = max(len(marker) for marker in TASK_PROMPT_MARKERS)
-
-    async def event_stream():
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-
-        def producer():
-            try:
-                for delta in stream_assistant_text(messages):
-                    asyncio.run_coroutine_threadsafe(queue.put(("delta", delta)), loop)
-                asyncio.run_coroutine_threadsafe(queue.put(("done", "")), loop)
-            except Exception as exc:
-                asyncio.run_coroutine_threadsafe(queue.put(("error", str(exc))), loop)
-
-        threading.Thread(target=producer, daemon=True).start()
-
-        buffer = ""
-        full_text = ""
-        marker_found = False
-
-        while True:
-            if await request.is_disconnected():
-                break
-
-            kind, value = await queue.get()
-            if kind == "delta":
-                full_text += value
-                if marker_found:
-                    continue
-
-                buffer += value
-                marker_index = -1
-                marker_len = 0
-                for marker in TASK_PROMPT_MARKERS:
-                    idx = buffer.find(marker)
-                    if idx != -1 and (marker_index == -1 or idx < marker_index):
-                        marker_index = idx
-                        marker_len = len(marker)
-
-                if marker_index != -1:
-                    before = buffer[:marker_index]
-                    if before:
-                        yield f"data: {json.dumps({'type': 'delta', 'text': before})}\\n\\n"
-                    buffer = buffer[marker_index + marker_len :]
-                    marker_found = True
-                    continue
-
-                if len(buffer) > marker_max_len:
-                    flush = buffer[:-marker_max_len]
-                    buffer = buffer[-marker_max_len:]
-                    if flush:
-                        yield f"data: {json.dumps({'type': 'delta', 'text': flush})}\\n\\n"
-            elif kind == "error":
-                yield f"data: {json.dumps({'type': 'error', 'message': value})}\\n\\n"
-                break
-            elif kind == "done":
-                if not marker_found and buffer:
-                    yield f"data: {json.dumps({'type': 'delta', 'text': buffer})}\\n\\n"
-
-                assistant_text, task_prompt = parse_task_prompt(full_text)
-
-                async with AsyncSessionLocal() as db2:
-                    session_row = await db2.get(SessionModel, session_id)
-                    if session_row:
-                        session_row.pending_task_prompt = task_prompt
-                        session_row.status = "awaiting_confirmation" if task_prompt else "idle"
-                        await db2.commit()
-                    msg = await add_message(db2, session_id, "assistant", assistant_text)
-
-                yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt})}\\n\\n"
-                break
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-async def _transcribe(file: UploadFile) -> str:
-    """Transcribe an uploaded audio file via OpenAI Whisper."""
-    transcript = await asyncio.to_thread(
-        lambda: openai_client.audio.transcriptions.create(
-            model="whisper-1",
-            file=(file.filename or "audio.webm", file.file, file.content_type or "audio/webm"),
-        )
-    )
-    return transcript.text
-
-
-@router.post("/{session_id}/messages/audio", response_model=AudioChatResponse)
-async def add_audio_message_endpoint(
-    session_id: UUID,
-    file: UploadFile,
-    db: AsyncSession = Depends(get_db),
-) -> AudioChatResponse:
-    session = await get_session(db, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    transcription = await _transcribe(file)
-    response = await handle_user_message(db, session, transcription)
-    return AudioChatResponse(
-        assistant_message=response.assistant_message,
-        task_id=response.task_id,
-        transcription=transcription,
-    )
-
-
-@router.post("/{session_id}/messages/audio/stream")
-async def add_audio_message_stream_endpoint(
-    session_id: UUID,
-    file: UploadFile,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    session = await get_session(db, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    transcription = await _transcribe(file)
-
-    await add_message(db, session.id, "user", transcription)
-
-    maybe_response = await maybe_handle_confirmation(db, session, transcription)
-    if maybe_response:
-        async def confirmation_stream():
-            yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
             yield f"data: {json.dumps({'type': 'message', 'text': maybe_response.assistant_message.content})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'task_id': str(maybe_response.task_id) if maybe_response.task_id else None})}\n\n"
 
         return StreamingResponse(confirmation_stream(), media_type="text/event-stream")
 
+    # Fetch Zep context for LLM enrichment
+    memory_context = zep.get_context() if zep else ""
+
     messages = await list_messages(db, session.id)
 
     marker_max_len = max(len(marker) for marker in TASK_PROMPT_MARKERS)
 
     async def event_stream():
-        yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
-
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
         def producer():
             try:
-                for delta in stream_assistant_text(messages):
+                for delta in stream_assistant_text(messages, memory_context=memory_context):
                     asyncio.run_coroutine_threadsafe(queue.put(("delta", delta)), loop)
                 asyncio.run_coroutine_threadsafe(queue.put(("done", "")), loop)
             except Exception as exc:
@@ -289,15 +166,202 @@ async def add_audio_message_stream_endpoint(
 
                 assistant_text, task_prompt = parse_task_prompt(full_text)
 
-                async with AsyncSessionLocal() as db2:
-                    session_row = await db2.get(SessionModel, session_id)
-                    if session_row:
-                        session_row.pending_task_prompt = task_prompt
-                        session_row.status = "awaiting_confirmation" if task_prompt else "idle"
-                        await db2.commit()
-                    msg = await add_message(db2, session_id, "assistant", assistant_text)
+                # Store assistant message in Zep
+                if zep:
+                    zep.add_message("assistant", assistant_text)
 
-                yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt})}\n\n"
+                task_id = None
+                async with AsyncSessionLocal() as db2:
+                    async with db2.begin():
+                        session_row = await db2.get(SessionModel, str(session_id))
+                        if session_row:
+                            if task_prompt:
+                                # Auto-execute browser task without confirmation
+                                from app.crud import create_task
+                                from app.task_executor import execute_task_background
+
+                                task = await create_task(db2, session_row, task_prompt)
+                                task_id = task.id
+                                session_row.status = "task_running"
+                                session_row.pending_task_prompt = None
+                            else:
+                                session_row.status = "idle"
+                                session_row.pending_task_prompt = None
+
+                        msg = await add_message(db2, session_id, "assistant", assistant_text)
+
+                # Yield done event BEFORE starting background task
+                yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
+
+                # Start task in background AFTER response is sent
+                if task_id and task_prompt:
+                    asyncio.create_task(execute_task_background(str(task_id), str(session_id), task_prompt))
+
+                break
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+async def _transcribe(file: UploadFile) -> str:
+    """Transcribe an uploaded audio file via OpenAI Whisper."""
+    transcript = await asyncio.to_thread(
+        lambda: openai_client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(file.filename or "audio.webm", file.file, file.content_type or "audio/webm"),
+        )
+    )
+    return transcript.text
+
+
+@router.post("/{session_id}/messages/audio", response_model=AudioChatResponse)
+async def add_audio_message_endpoint(
+    session_id: UUID,
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+) -> AudioChatResponse:
+    session = await get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    transcription = await _transcribe(file)
+    response = await handle_user_message(db, session, transcription)
+    return AudioChatResponse(
+        assistant_message=response.assistant_message,
+        task_id=response.task_id,
+        transcription=transcription,
+    )
+
+
+@router.post("/{session_id}/messages/audio/stream")
+async def add_audio_message_stream_endpoint(
+    session_id: UUID,
+    file: UploadFile,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.conversation import _get_zep
+
+    session = await get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    transcription = await _transcribe(file)
+
+    await add_message(db, session.id, "user", transcription)
+
+    # Store user message in Zep
+    zep = _get_zep()
+    if zep:
+        zep.add_message("user", transcription)
+
+    maybe_response = await maybe_handle_confirmation(db, session, transcription)
+    if maybe_response:
+        async def confirmation_stream():
+            yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
+            yield f"data: {json.dumps({'type': 'message', 'text': maybe_response.assistant_message.content})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'task_id': str(maybe_response.task_id) if maybe_response.task_id else None})}\n\n"
+
+        return StreamingResponse(confirmation_stream(), media_type="text/event-stream")
+
+    # Fetch Zep context for LLM enrichment
+    memory_context = zep.get_context() if zep else ""
+
+    messages = await list_messages(db, session.id)
+
+    marker_max_len = max(len(marker) for marker in TASK_PROMPT_MARKERS)
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+        def producer():
+            try:
+                for delta in stream_assistant_text(messages, memory_context=memory_context):
+                    asyncio.run_coroutine_threadsafe(queue.put(("delta", delta)), loop)
+                asyncio.run_coroutine_threadsafe(queue.put(("done", "")), loop)
+            except Exception as exc:
+                asyncio.run_coroutine_threadsafe(queue.put(("error", str(exc))), loop)
+
+        threading.Thread(target=producer, daemon=True).start()
+
+        buffer = ""
+        full_text = ""
+        marker_found = False
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            kind, value = await queue.get()
+            if kind == "delta":
+                full_text += value
+                if marker_found:
+                    continue
+
+                buffer += value
+                marker_index = -1
+                marker_len = 0
+                for marker in TASK_PROMPT_MARKERS:
+                    idx = buffer.find(marker)
+                    if idx != -1 and (marker_index == -1 or idx < marker_index):
+                        marker_index = idx
+                        marker_len = len(marker)
+
+                if marker_index != -1:
+                    before = buffer[:marker_index]
+                    if before:
+                        yield f"data: {json.dumps({'type': 'delta', 'text': before})}\n\n"
+                    buffer = buffer[marker_index + marker_len :]
+                    marker_found = True
+                    continue
+
+                if len(buffer) > marker_max_len:
+                    flush = buffer[:-marker_max_len]
+                    buffer = buffer[-marker_max_len:]
+                    if flush:
+                        yield f"data: {json.dumps({'type': 'delta', 'text': flush})}\n\n"
+            elif kind == "error":
+                yield f"data: {json.dumps({'type': 'error', 'message': value})}\n\n"
+                break
+            elif kind == "done":
+                if not marker_found and buffer:
+                    yield f"data: {json.dumps({'type': 'delta', 'text': buffer})}\n\n"
+
+                assistant_text, task_prompt = parse_task_prompt(full_text)
+
+                # Store assistant message in Zep
+                if zep:
+                    zep.add_message("assistant", assistant_text)
+
+                task_id = None
+                async with AsyncSessionLocal() as db2:
+                    async with db2.begin():
+                        session_row = await db2.get(SessionModel, str(session_id))
+                        if session_row:
+                            if task_prompt:
+                                # Auto-execute browser task without confirmation
+                                from app.crud import create_task
+                                from app.task_executor import execute_task_background
+
+                                task = await create_task(db2, session_row, task_prompt)
+                                task_id = task.id
+                                session_row.status = "task_running"
+                                session_row.pending_task_prompt = None
+                            else:
+                                session_row.status = "idle"
+                                session_row.pending_task_prompt = None
+
+                        msg = await add_message(db2, session_id, "assistant", assistant_text)
+
+                # Yield done event BEFORE starting background task
+                yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
+
+                # Start task in background AFTER response is sent
+                if task_id and task_prompt:
+                    asyncio.create_task(execute_task_background(str(task_id), str(session_id), task_prompt))
+
                 break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
