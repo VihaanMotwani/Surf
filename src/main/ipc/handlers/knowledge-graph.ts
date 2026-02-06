@@ -1,8 +1,7 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../channels'
 
-// TODO: Integrate with actual backend memory system
-// This is a placeholder implementation with mock graph data
+const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:8000'
 
 interface GraphNode {
   id: string
@@ -63,9 +62,23 @@ function generateMockGraphData(): GraphData {
 
 export function registerKnowledgeGraphHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.GRAPH_GET_DATA, async () => {
-    // Simulate some delay
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    return generateMockGraphData()
+    try {
+      // Try to fetch from backend first
+      const response = await fetch(`${BACKEND_URL}/api/graph`)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Loaded knowledge graph from backend:', data.nodes.length, 'nodes')
+        return data
+      } else {
+        console.warn('Backend returned error:', response.status, '- using mock data')
+        return generateMockGraphData()
+      }
+    } catch (error) {
+      console.warn('Failed to fetch graph from backend, using mock data:', error)
+      // Fallback to mock data if backend is not available
+      return generateMockGraphData()
+    }
   })
 
   ipcMain.handle(IPC_CHANNELS.GRAPH_UPDATE_NODE, async (_event, nodeId: string, updates: Partial<GraphNode>) => {
@@ -79,11 +92,37 @@ export function registerKnowledgeGraphHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.GRAPH_SEARCH, async (_event, query: string) => {
-    // TODO: Implement actual search
-    const graphData = generateMockGraphData()
-    const filteredNodes = graphData.nodes.filter((node) =>
-      node.label.toLowerCase().includes(query.toLowerCase())
-    )
-    return { nodes: filteredNodes }
+    try {
+      // Try backend search first
+      const response = await fetch(`${BACKEND_URL}/api/graph/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query, limit: 10 })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Graph search from backend:', data.nodes.length, 'results')
+        return data
+      } else {
+        console.warn('Backend search failed, using local fallback')
+        // Fallback to local search
+        const graphData = generateMockGraphData()
+        const filteredNodes = graphData.nodes.filter((node) =>
+          node.label.toLowerCase().includes(query.toLowerCase())
+        )
+        return { nodes: filteredNodes }
+      }
+    } catch (error) {
+      console.warn('Failed to search backend, using mock data:', error)
+      // Fallback to mock data search
+      const graphData = generateMockGraphData()
+      const filteredNodes = graphData.nodes.filter((node) =>
+        node.label.toLowerCase().includes(query.toLowerCase())
+      )
+      return { nodes: filteredNodes }
+    }
   })
 }
