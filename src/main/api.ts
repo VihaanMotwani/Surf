@@ -2,6 +2,24 @@
 
 const API_BASE = 'http://127.0.0.1:8000'
 
+export async function apiGet<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`API ${res.status}: ${text}`)
+  }
+  return res.json() as Promise<T>
+}
+
+export async function apiDelete<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`API ${res.status}: ${text}`)
+  }
+  return res.json() as Promise<T>
+}
+
 export async function apiPost<T = unknown>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4.1-mini"
     openai_api_key: str | None = None
     browser_use_api_key: str | None = None
+    fact_extraction_model: str = "gpt-4.1-mini"
 
     # Zep memory (optional — graceful fallback when not set)
     zep_api_key: str | None = None

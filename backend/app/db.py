@@ -1,4 +1,4 @@
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -27,3 +27,8 @@ async def get_db() -> AsyncSession:
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate: add title column if missing (SQLite)
+        try:
+            await conn.execute(text("ALTER TABLE sessions ADD COLUMN title VARCHAR(256)"))
+        except Exception:
+            pass  # column already exists

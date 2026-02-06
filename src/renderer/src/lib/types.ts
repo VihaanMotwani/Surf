@@ -6,12 +6,15 @@ export interface ChatMessage {
   content: string
   timestamp: number
   isStreaming?: boolean
+  taskId?: string
+  taskStatus?: 'running' | 'succeeded' | 'failed'
+  taskResult?: Record<string, unknown>
 }
 
 export interface GraphNode {
   id: string
   label: string
-  type: 'user' | 'preference' | 'website' | 'task' | 'memory'
+  type: 'user' | 'preference' | 'website' | 'task' | 'memory' | 'fact'
   x?: number
   y?: number
   size?: number
@@ -34,13 +37,11 @@ export interface GraphData {
 
 export interface Session {
   id: string
-  title: string
-  description: string
-  timestamp: number
-  duration: number
-  outcome: 'success' | 'partial' | 'failed'
-  actions: string[]
-  urlsVisited: string[]
+  title: string | null
+  status: string
+  message_count: number
+  created_at: string
+  updated_at: string
 }
 
 export interface AppSettings {

@@ -68,7 +68,7 @@ class VoiceAgent:
 
         base_prompt = (
             "You are Surf, a helpful voice assistant that can browse the web for users.\n\n"
-            "Always respond in english, even if the user speaks in another language.\n\n"
+            "ALWAYS respond in English, even if the user speaks in another language.\n\n"
             "You have access to the user's memory and preferences. Use this context to "
             "personalize your responses and tasks.\n\n"
             "When the user asks you to do something on the web (search, navigate, fill forms, etc.), "

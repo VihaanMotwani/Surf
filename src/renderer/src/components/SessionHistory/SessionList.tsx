@@ -9,8 +9,7 @@ export function SessionList() {
   const [searchQuery, setSearchQuery] = useState('')
 
   const filteredSessions = sessions.filter((session) =>
-    session.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    session.description.toLowerCase().includes(searchQuery.toLowerCase())
+    (session.title || 'Untitled').toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   return (

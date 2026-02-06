@@ -1,6 +1,7 @@
 """
 Knowledge Graph API routes for Surf.
 Exposes Zep knowledge graph data to the Electron frontend.
+Falls back to local SQLite-based fact store when Zep is not configured.
 """
 
 import os
@@ -9,6 +10,8 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
+from app.local_memory import get_local_graph_data, search_local_facts, get_local_graph_stats
 from app.memory import get_memory_client
 
 router = APIRouter(prefix="/api/graph", tags=["knowledge-graph"])
@@ -49,176 +52,136 @@ class SearchResult(BaseModel):
     message: Optional[str] = None
 
 
+def _is_zep_configured() -> bool:
+    """Check if Zep Cloud is configured."""
+    return bool(settings.zep_api_key)
+
+
 @router.get("", response_model=GraphData)
 async def get_knowledge_graph():
     """
-    Retrieve the complete knowledge graph for the current user from Zep.
-
-    Returns nodes and edges representing the user's knowledge graph.
+    Retrieve the complete knowledge graph for the current user.
+    Always includes local SQLite facts. Merges Zep data when available.
     """
-    try:
-        memory = get_memory_client()
+    user_name = settings.zep_user_name or "User"
 
-        # Search the knowledge graph for all episodes/facts
-        # Zep requires a non-empty query and max 50 items
-        search_results = memory.client.graph.search(
-            user_id=memory.user_id,
-            query="*",  # Wildcard query to match all
-            limit=50
-        )
+    # Always get local facts
+    local_data = await get_local_graph_data(user_name)
+    nodes = [GraphNode(**n) for n in local_data["nodes"]]
+    edges = [GraphEdge(**e) for e in local_data["edges"]]
 
-        nodes = []
-        edges = []
-        node_ids = set()
-
-        # Convert Zep episodes to graph nodes
-        if hasattr(search_results, 'episodes') and search_results.episodes:
-            for idx, episode in enumerate(search_results.episodes):
-                # Create node for each episode/fact
-                node_id = f"episode_{idx}"
-
-                # Extract content and metadata
-                content = episode.content if hasattr(episode, 'content') else str(episode)
-                episode_type = episode.type if hasattr(episode, 'type') else "fact"
-
-                # Determine node type based on content
-                node_type = _classify_node_type(content, episode_type)
-
-                node = GraphNode(
-                    id=node_id,
-                    label=_extract_label(content),
-                    type=node_type,
-                    size=15,
-                    color=_get_node_color(node_type),
-                    metadata={
-                        "content": content,
-                        "created_at": episode.created_at if hasattr(episode, 'created_at') else None,
-                        "episode_type": episode_type
-                    }
-                )
-                nodes.append(node)
-                node_ids.add(node_id)
-
-                # Create edge to user node
-                if idx == 0:
-                    # Add central user node
-                    user_node = GraphNode(
-                        id="user_1",
-                        label=os.environ.get("ZEP_USER_NAME", "User"),
-                        type="user",
-                        size=20,
-                        color="#3b82f6"
-                    )
-                    nodes.insert(0, user_node)
-                    node_ids.add("user_1")
-
-                # Create edge from user to this episode
-                edge = GraphEdge(
-                    id=f"edge_{idx}",
-                    source="user_1",
-                    target=node_id,
-                    label=_get_edge_label(node_type),
-                    type="relationship"
-                )
-                edges.append(edge)
-
-        # If no data from Zep, return empty graph with just user node
-        if not nodes:
-            user_node = GraphNode(
-                id="user_1",
-                label=os.environ.get("ZEP_USER_NAME", "User"),
-                type="user",
-                size=20,
-                color="#3b82f6",
-                metadata={"message": "No knowledge graph data yet. Start using Surf to build your memory!"}
+    # Try to merge Zep data if configured
+    if _is_zep_configured():
+        try:
+            memory = get_memory_client()
+            search_results = memory.client.graph.search(
+                user_id=memory.user_id,
+                query="*",
+                limit=50
             )
-            nodes.append(user_node)
 
-        return GraphData(nodes=nodes, edges=edges)
+            if hasattr(search_results, 'episodes') and search_results.episodes:
+                edge_offset = len(edges)
+                for idx, episode in enumerate(search_results.episodes):
+                    node_id = f"episode_{idx}"
+                    content = episode.content if hasattr(episode, 'content') else str(episode)
+                    episode_type = episode.type if hasattr(episode, 'type') else "fact"
+                    node_type = _classify_node_type(content, episode_type)
 
-    except Exception as e:
-        print(f"[KG] Error fetching graph: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch knowledge graph: {str(e)}")
+                    nodes.append(GraphNode(
+                        id=node_id,
+                        label=_extract_label(content),
+                        type=node_type,
+                        size=15,
+                        color=_get_node_color(node_type),
+                        metadata={
+                            "content": content,
+                            "created_at": episode.created_at if hasattr(episode, 'created_at') else None,
+                            "episode_type": episode_type,
+                            "source": "zep",
+                        }
+                    ))
+                    edges.append(GraphEdge(
+                        id=f"edge_{edge_offset + idx}",
+                        source="user_1",
+                        target=node_id,
+                        label=_get_edge_label(node_type),
+                        type="relationship"
+                    ))
+        except Exception as e:
+            print(f"[KG] Zep fetch failed, using local only: {e}")
+
+    return GraphData(nodes=nodes, edges=edges)
 
 
 @router.post("/search", response_model=SearchResult)
 async def search_knowledge_graph(search: SearchQuery):
     """
-    Search the knowledge graph using natural language query.
-
-    Uses Zep's semantic search to find relevant nodes.
+    Search the knowledge graph. Always searches local facts, merges Zep results when available.
     """
-    try:
-        memory = get_memory_client()
+    limit = search.limit or 10
 
-        # Use Zep's semantic search
-        search_results = memory.client.graph.search(
-            user_id=memory.user_id,
-            query=search.query,
-            limit=search.limit or 10
-        )
+    # Always search local facts
+    local_results = await search_local_facts(search.query, limit=limit)
+    nodes = [GraphNode(**n) for n in local_results]
 
-        nodes = []
+    # Try Zep search too
+    if _is_zep_configured():
+        try:
+            memory = get_memory_client()
+            search_results = memory.client.graph.search(
+                user_id=memory.user_id,
+                query=search.query,
+                limit=limit
+            )
 
-        if hasattr(search_results, 'episodes') and search_results.episodes:
-            for idx, episode in enumerate(search_results.episodes):
-                node_id = f"result_{idx}"
-                content = episode.content if hasattr(episode, 'content') else str(episode)
-                episode_type = episode.type if hasattr(episode, 'type') else "fact"
-                node_type = _classify_node_type(content, episode_type)
+            if hasattr(search_results, 'episodes') and search_results.episodes:
+                offset = len(nodes)
+                for idx, episode in enumerate(search_results.episodes):
+                    content = episode.content if hasattr(episode, 'content') else str(episode)
+                    episode_type = episode.type if hasattr(episode, 'type') else "fact"
+                    node_type = _classify_node_type(content, episode_type)
 
-                node = GraphNode(
-                    id=node_id,
-                    label=_extract_label(content),
-                    type=node_type,
-                    size=15,
-                    color=_get_node_color(node_type),
-                    metadata={
-                        "content": content,
-                        "score": episode.score if hasattr(episode, 'score') else None,
-                        "episode_type": episode_type
-                    }
-                )
-                nodes.append(node)
+                    nodes.append(GraphNode(
+                        id=f"result_{offset + idx}",
+                        label=_extract_label(content),
+                        type=node_type,
+                        size=15,
+                        color=_get_node_color(node_type),
+                        metadata={
+                            "content": content,
+                            "score": episode.score if hasattr(episode, 'score') else None,
+                            "episode_type": episode_type,
+                            "source": "zep",
+                        }
+                    ))
+        except Exception as e:
+            print(f"[KG] Zep search failed, using local only: {e}")
 
-        message = f"Found {len(nodes)} results" if nodes else "No results found"
-
-        return SearchResult(nodes=nodes, message=message)
-
-    except Exception as e:
-        print(f"[KG] Error searching graph: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+    message = f"Found {len(nodes)} results" if nodes else "No results found"
+    return SearchResult(nodes=nodes, message=message)
 
 
 @router.get("/stats")
 async def get_graph_stats():
-    """Get statistics about the knowledge graph."""
-    try:
-        memory = get_memory_client()
+    """Get statistics about the knowledge graph. Always includes local facts count."""
+    local_stats = await get_local_graph_stats()
+    local_stats["user_id"] = settings.zep_user_id
 
-        # Get recent facts
-        # Zep requires a non-empty query and max 50 items
-        search_results = memory.client.graph.search(
-            user_id=memory.user_id,
-            query="*",
-            limit=50
-        )
+    if _is_zep_configured():
+        try:
+            memory = get_memory_client()
+            search_results = memory.client.graph.search(
+                user_id=memory.user_id,
+                query="*",
+                limit=50
+            )
+            zep_facts = len(search_results.episodes) if hasattr(search_results, 'episodes') else 0
+            local_stats["total_facts"] = local_stats.get("total_facts", 0) + zep_facts
+        except Exception as e:
+            print(f"[KG] Zep stats failed: {e}")
 
-        total_facts = len(search_results.episodes) if hasattr(search_results, 'episodes') else 0
-
-        return {
-            "user_id": memory.user_id,
-            "total_facts": total_facts,
-            "status": "connected"
-        }
-    except Exception as e:
-        print(f"[KG] Error getting stats: {e}")
-        return {
-            "user_id": os.environ.get("ZEP_USER_ID", "unknown"),
-            "total_facts": 0,
-            "status": "error",
-            "error": str(e)
-        }
+    return local_stats
 
 
 # Helper functions

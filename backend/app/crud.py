@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Artifact, Message, Session, Task, TaskEvent
@@ -17,6 +17,40 @@ async def create_session(db: AsyncSession) -> Session:
 async def get_session(db: AsyncSession, session_id: str) -> Session | None:
     result = await db.execute(select(Session).where(Session.id == str(session_id)))
     return result.scalar_one_or_none()
+
+
+async def list_sessions(db: AsyncSession) -> list[dict]:
+    """Return all sessions with message counts, ordered by updated_at DESC."""
+    stmt = (
+        select(
+            Session,
+            func.count(Message.id).label("message_count"),
+        )
+        .outerjoin(Message, Message.session_id == Session.id)
+        .group_by(Session.id)
+        .order_by(Session.updated_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "id": row.Session.id,
+            "title": row.Session.title,
+            "status": row.Session.status,
+            "message_count": row.message_count,
+            "created_at": row.Session.created_at,
+            "updated_at": row.Session.updated_at,
+        }
+        for row in rows
+    ]
+
+
+async def delete_session(db: AsyncSession, session_id: str) -> bool:
+    session = await get_session(db, session_id)
+    if not session:
+        return False
+    await db.delete(session)
+    await db.commit()
+    return True
 
 
 async def add_message(db: AsyncSession, session_id: str, role: str, content: str) -> Message:
@@ -76,3 +110,37 @@ async def list_task_events(
 async def list_artifacts(db: AsyncSession, task_id: str) -> list[Artifact]:
     result = await db.execute(select(Artifact).where(Artifact.task_id == str(task_id)))
     return list(result.scalars().all())
+
+
+async def get_latest_task_result(db: AsyncSession, session_id: str) -> dict | None:
+    """Return the result payload of the most recently completed task in a session."""
+    stmt = (
+        select(Task)
+        .where(Task.session_id == str(session_id))
+        .where(Task.status.in_(["succeeded", "failed"]))
+        .order_by(Task.finished_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+    if not task:
+        return None
+
+    # Get the result event
+    evt_stmt = (
+        select(TaskEvent)
+        .where(TaskEvent.task_id == task.id)
+        .where(TaskEvent.type.in_(["result", "error"]))
+        .order_by(TaskEvent.id.desc())
+        .limit(1)
+    )
+    evt_result = await db.execute(evt_stmt)
+    event = evt_result.scalar_one_or_none()
+
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "prompt": task.prompt,
+        "error": task.error,
+        "payload": event.payload if event else {},
+    }

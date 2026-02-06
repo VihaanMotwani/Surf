@@ -7,31 +7,30 @@ export function Header() {
   const { currentView } = useUIStore()
 
   const titles: Record<string, string> = {
-    chat: 'Chat Interface',
+    chat: 'Chat',
     graph: 'Knowledge Graph',
-    sessions: 'Session History'
+    sessions: 'Sessions'
   }
 
   return (
     <header
-      className="flex h-16 items-center justify-between border-b bg-background px-6"
+      className="flex h-12 items-center justify-between border-b bg-background px-6"
       role="banner"
     >
-      <div>
-        <h2 className="text-lg font-semibold" id="page-title">
-          {titles[currentView] || 'Surf'}
-        </h2>
-      </div>
+      <h2 className="text-sm font-medium text-muted-foreground" id="page-title">
+        {titles[currentView] || 'Surf'}
+      </h2>
 
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center gap-2">
         <AccessibilityControls />
 
         <Button
           variant="ghost"
           size="icon"
+          className="h-8 w-8 text-muted-foreground"
           aria-label="Open settings"
         >
-          <Settings className="h-5 w-5" />
+          <Settings className="h-4 w-4" />
         </Button>
       </div>
     </header>

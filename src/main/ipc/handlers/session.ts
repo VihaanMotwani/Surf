@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../channels'
-import { apiPost } from '../../api'
+import { apiGet, apiPost, apiDelete } from '../../api'
 
 export function registerSessionHandlers(): void {
   // Create a new session
@@ -8,20 +8,23 @@ export function registerSessionHandlers(): void {
     return await apiPost('/sessions', {})
   })
 
-  // Placeholder handlers for other session operations
+  // List all sessions
   ipcMain.handle(IPC_CHANNELS.SESSION_GET_ALL, async () => {
-    return []
+    return await apiGet('/sessions')
   })
 
+  // Get session by ID (with messages)
   ipcMain.handle(IPC_CHANNELS.SESSION_GET_BY_ID, async (_event, sessionId: string) => {
-    return { id: sessionId }
+    return await apiGet(`/sessions/${sessionId}?include_messages=true`)
   })
 
+  // Resume session (same as get by ID - loads the session)
   ipcMain.handle(IPC_CHANNELS.SESSION_RESUME, async (_event, sessionId: string) => {
-    return { success: true, sessionId }
+    return await apiGet(`/sessions/${sessionId}?include_messages=true`)
   })
 
+  // Delete session
   ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, async (_event, sessionId: string) => {
-    return { success: true, sessionId }
+    return await apiDelete(`/sessions/${sessionId}`)
   })
 }

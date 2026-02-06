@@ -32,6 +32,10 @@ export const IPC_CHANNELS = {
   SPEECH_RECOGNIZE_START: 'speech:recognize-start',
   SPEECH_RECOGNIZE_STOP: 'speech:recognize-stop',
 
+  // Task channels
+  TASK_GET_STATUS: 'task:get-status',
+  TASK_GET_EVENTS: 'task:get-events',
+
   // Settings channels
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update'

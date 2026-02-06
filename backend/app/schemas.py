@@ -22,8 +22,18 @@ class MessageResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class SessionListItem(BaseModel):
+    id: UUID
+    title: str | None = None
+    status: str
+    message_count: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class SessionResponse(BaseModel):
     id: UUID
+    title: str | None = None
     status: str
     pending_task_prompt: str | None = None
     created_at: datetime | None = None

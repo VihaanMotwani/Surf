@@ -8,9 +8,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conversation import handle_user_message, check_task_running
-from app.crud import add_message, create_session, get_session, list_messages
+from app.crud import add_message, create_session, delete_session, get_latest_task_result, get_session, list_messages, list_sessions
 from app.db import AsyncSessionLocal, get_db
-from app.llm import TASK_PROMPT_MARKERS, client as openai_client, parse_task_prompt, stream_assistant_text
+from app.llm import TASK_PROMPT_MARKERS, client as openai_client, is_describe_request, parse_task_prompt, stream_assistant_text, stream_describe_screenshot
+from app.local_memory import extract_and_store_facts, get_memory_context as get_local_memory_context
 from app.models import Session as SessionModel
 from app.schemas import (
     AudioChatResponse,
@@ -18,16 +19,122 @@ from app.schemas import (
     MessageCreateRequest,
     MessageResponse,
     SessionCreateResponse,
+    SessionListItem,
     SessionResponse,
 )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
+def _build_task_context(task_result: dict | None) -> str:
+    """Build a rich LLM context string from a task result dict."""
+    if not task_result:
+        return ""
+
+    payload = task_result.get("payload", {})
+    lines = [
+        "--- LAST BROWSER TASK ---",
+        f"Task: {task_result['prompt']}",
+        f"Status: {task_result['status']}",
+    ]
+
+    if task_result["status"] == "succeeded":
+        final = payload.get("final_result")
+        if final:
+            lines.append(f"Final result: {final}")
+
+        n_steps = payload.get("number_of_steps")
+        duration = payload.get("total_duration_seconds")
+        if n_steps or duration is not None:
+            meta = []
+            if n_steps:
+                meta.append(f"{n_steps} steps")
+            if duration is not None:
+                meta.append(f"{round(duration, 1)}s")
+            lines.append(f"Overview: {', '.join(meta)}")
+
+        # Step-by-step breakdown
+        steps = payload.get("steps", [])
+        if steps:
+            lines.append("")
+            lines.append("Step-by-step:")
+            for step in steps:
+                step_num = step.get("step", "?")
+                title = step.get("page_title", "")
+                url = step.get("url", "")
+                goal = step.get("next_goal", "")
+                evaluation = step.get("evaluation", "")
+
+                header = f"  Step {step_num}"
+                if title:
+                    header += f" [{title}]"
+                if url and url != "about:blank":
+                    header += f" ({url})"
+                lines.append(header)
+
+                if evaluation:
+                    lines.append(f"    Evaluation: {evaluation}")
+                if goal:
+                    lines.append(f"    Goal: {goal}")
+
+                for action in step.get("actions", []):
+                    if isinstance(action, dict):
+                        for action_name, params in action.items():
+                            if isinstance(params, dict):
+                                lines.append(f"    Action: {action_name}({', '.join(f'{k}={v!r}' for k, v in params.items())})")
+                            else:
+                                lines.append(f"    Action: {action_name}: {params}")
+
+                for r in step.get("results", []):
+                    if r.get("extracted_content"):
+                        lines.append(f"    Content: {r['extracted_content']}")
+                    if r.get("error"):
+                        lines.append(f"    Error: {r['error']}")
+
+        # Extracted content summary
+        extracted = payload.get("extracted_content", [])
+        if extracted:
+            lines.append("")
+            lines.append("Extracted content:")
+            for content in extracted:
+                lines.append(f"  - {content}")
+
+        # Unique URLs
+        urls = payload.get("urls", [])
+        if urls:
+            lines.append("")
+            lines.append("Pages visited: " + ", ".join(urls))
+
+        errors = payload.get("errors", [])
+        if errors:
+            lines.append("Errors: " + "; ".join(errors))
+
+    elif task_result.get("error"):
+        lines.append(f"Error: {task_result['error']}")
+
+    lines.append("--- END TASK ---")
+    lines.append("Use this data only if the user asks about the task. Otherwise continue normally.")
+
+    return "\n".join(lines)
+
+
 @router.post("", response_model=SessionCreateResponse)
 async def create_session_endpoint(db: AsyncSession = Depends(get_db)) -> SessionCreateResponse:
     session = await create_session(db)
     return SessionCreateResponse(id=session.id, status=session.status, created_at=session.created_at)
+
+
+@router.get("", response_model=list[SessionListItem])
+async def list_sessions_endpoint(db: AsyncSession = Depends(get_db)):
+    return await list_sessions(db)
+
+
+@router.delete("/{session_id}")
+async def delete_session_endpoint(session_id: UUID, db: AsyncSession = Depends(get_db)):
+    deleted = await delete_session(db, str(session_id))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"success": True}
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
@@ -50,6 +157,7 @@ async def get_session_endpoint(
 
     return SessionResponse(
         id=session.id,
+        title=session.title,
         status=session.status,
         pending_task_prompt=session.pending_task_prompt,
         created_at=session.created_at,
@@ -100,10 +208,64 @@ async def add_message_stream_endpoint(
 
         return StreamingResponse(busy_stream(), media_type="text/event-stream")
 
-    # Fetch Zep context for LLM enrichment
-    memory_context = zep.get_context() if zep else ""
+    # Fetch memory context for LLM enrichment (always include local facts)
+    local_ctx = await get_local_memory_context()
+    zep_ctx = zep.get_context() if zep else ""
 
+    # Include latest browser task result so the LLM can describe it if asked
+    task_result = await get_latest_task_result(db, str(session_id))
+    task_ctx = _build_task_context(task_result)
+
+    memory_context = "\n\n".join(filter(None, [zep_ctx, local_ctx, task_ctx]))
+
+    user_content = payload.content
     messages = await list_messages(db, session.id)
+
+    # Check if this is a "describe screen" request
+    if is_describe_request(user_content):
+        from app.task_executor import capture_screenshot_b64
+
+        async def describe_stream():
+            screenshot = await capture_screenshot_b64()
+            if not screenshot:
+                no_screen_msg = "I don't have a browser screen to describe right now. Start a browser task first, then ask me to describe what I see."
+                yield f"data: {json.dumps({'type': 'delta', 'text': no_screen_msg})}\n\n"
+                async with AsyncSessionLocal() as db2:
+                    msg = await add_message(db2, session_id, "assistant", no_screen_msg)
+                yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': None, 'task_id': None})}\n\n"
+                return
+
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+            def producer():
+                try:
+                    for delta in stream_describe_screenshot(screenshot, user_content):
+                        asyncio.run_coroutine_threadsafe(queue.put(("delta", delta)), loop)
+                    asyncio.run_coroutine_threadsafe(queue.put(("done", "")), loop)
+                except Exception as exc:
+                    asyncio.run_coroutine_threadsafe(queue.put(("error", str(exc))), loop)
+
+            threading.Thread(target=producer, daemon=True).start()
+
+            full_text = ""
+            while True:
+                if await request.is_disconnected():
+                    break
+                kind, value = await queue.get()
+                if kind == "delta":
+                    full_text += value
+                    yield f"data: {json.dumps({'type': 'delta', 'text': value})}\n\n"
+                elif kind == "error":
+                    yield f"data: {json.dumps({'type': 'error', 'message': value})}\n\n"
+                    break
+                elif kind == "done":
+                    async with AsyncSessionLocal() as db2:
+                        msg = await add_message(db2, session_id, "assistant", full_text)
+                    yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': None, 'task_id': None})}\n\n"
+                    break
+
+        return StreamingResponse(describe_stream(), media_type="text/event-stream")
 
     marker_max_len = max(len(marker) for marker in TASK_PROMPT_MARKERS)
 
@@ -174,6 +336,10 @@ async def add_message_stream_endpoint(
                 async with AsyncSessionLocal() as db2:
                     session_row = await db2.get(SessionModel, str(session_id))
                     if session_row:
+                        # Auto-title: set to first user message (truncated) if no title yet
+                        if not session_row.title:
+                            session_row.title = user_content[:50]
+
                         if task_prompt:
                             from app.crud import create_task
                             from app.task_executor import execute_task_background
@@ -190,6 +356,9 @@ async def add_message_stream_endpoint(
                 # Yield done event BEFORE starting background task
                 yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
 
+                # Background fact extraction
+                asyncio.create_task(extract_and_store_facts(user_content, assistant_text, session_id=str(session_id)))
+
                 # Start task in background AFTER response is sent
                 if task_id and task_prompt:
                     asyncio.create_task(execute_task_background(str(task_id), str(session_id), task_prompt))
@@ -199,12 +368,32 @@ async def add_message_stream_endpoint(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+_MIME_TO_EXT = {
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "mp4",
+    "audio/m4a": "m4a",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/mpga": "mpga",
+    "audio/oga": "oga",
+    "video/webm": "webm",
+    "video/mp4": "mp4",
+}
+
+
 async def _transcribe(file: UploadFile) -> str:
     """Transcribe an uploaded audio file via OpenAI Whisper."""
-    # Read file content before passing to thread — SpooledTemporaryFile can't cross threads safely
     content = await file.read()
-    filename = file.filename or "audio.webm"
     content_type = file.content_type or "audio/webm"
+
+    # Derive a filename with a valid extension so Whisper accepts it
+    ext = _MIME_TO_EXT.get(content_type, "webm")
+    filename = f"audio.{ext}"
 
     transcript = await asyncio.to_thread(
         lambda: openai_client.audio.transcriptions.create(
@@ -265,10 +454,66 @@ async def add_audio_message_stream_endpoint(
 
         return StreamingResponse(busy_stream(), media_type="text/event-stream")
 
-    # Fetch Zep context for LLM enrichment
-    memory_context = zep.get_context() if zep else ""
+    # Fetch memory context for LLM enrichment (always include local facts)
+    local_ctx = await get_local_memory_context()
+    zep_ctx = zep.get_context() if zep else ""
 
+    # Include latest browser task result so the LLM can describe it if asked
+    task_result = await get_latest_task_result(db, str(session_id))
+    task_ctx = _build_task_context(task_result)
+
+    memory_context = "\n\n".join(filter(None, [zep_ctx, local_ctx, task_ctx]))
+
+    audio_user_content = transcription
     messages = await list_messages(db, session.id)
+
+    # Check if this is a "describe screen" request (via voice)
+    if is_describe_request(transcription):
+        from app.task_executor import capture_screenshot_b64
+
+        async def describe_audio_stream():
+            yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
+
+            screenshot = await capture_screenshot_b64()
+            if not screenshot:
+                no_screen_msg = "I don't have a browser screen to describe right now. Start a browser task first, then ask me to describe what I see."
+                yield f"data: {json.dumps({'type': 'delta', 'text': no_screen_msg})}\n\n"
+                async with AsyncSessionLocal() as db2:
+                    msg = await add_message(db2, session_id, "assistant", no_screen_msg)
+                yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': None, 'task_id': None})}\n\n"
+                return
+
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+            def producer():
+                try:
+                    for delta in stream_describe_screenshot(screenshot, transcription):
+                        asyncio.run_coroutine_threadsafe(queue.put(("delta", delta)), loop)
+                    asyncio.run_coroutine_threadsafe(queue.put(("done", "")), loop)
+                except Exception as exc:
+                    asyncio.run_coroutine_threadsafe(queue.put(("error", str(exc))), loop)
+
+            threading.Thread(target=producer, daemon=True).start()
+
+            full_text = ""
+            while True:
+                if await request.is_disconnected():
+                    break
+                kind, value = await queue.get()
+                if kind == "delta":
+                    full_text += value
+                    yield f"data: {json.dumps({'type': 'delta', 'text': value})}\n\n"
+                elif kind == "error":
+                    yield f"data: {json.dumps({'type': 'error', 'message': value})}\n\n"
+                    break
+                elif kind == "done":
+                    async with AsyncSessionLocal() as db2:
+                        msg = await add_message(db2, session_id, "assistant", full_text)
+                    yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': None, 'task_id': None})}\n\n"
+                    break
+
+        return StreamingResponse(describe_audio_stream(), media_type="text/event-stream")
 
     marker_max_len = max(len(marker) for marker in TASK_PROMPT_MARKERS)
 
@@ -341,6 +586,10 @@ async def add_audio_message_stream_endpoint(
                 async with AsyncSessionLocal() as db2:
                     session_row = await db2.get(SessionModel, str(session_id))
                     if session_row:
+                        # Auto-title: set to first user message (truncated) if no title yet
+                        if not session_row.title:
+                            session_row.title = audio_user_content[:50]
+
                         if task_prompt:
                             from app.crud import create_task
                             from app.task_executor import execute_task_background
@@ -356,6 +605,9 @@ async def add_audio_message_stream_endpoint(
 
                 # Yield done event BEFORE starting background task
                 yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
+
+                # Background fact extraction
+                asyncio.create_task(extract_and_store_facts(audio_user_content, assistant_text, session_id=str(session_id)))
 
                 # Start task in background AFTER response is sent
                 if task_id and task_prompt:

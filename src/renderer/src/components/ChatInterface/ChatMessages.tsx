@@ -22,19 +22,34 @@ export function ChatMessages() {
     >
       {messages.length === 0 ? (
         <div className="flex h-full items-center justify-center">
-          <div className="text-center space-y-4 max-w-md">
-            <h2 className="text-2xl font-bold">Welcome to Surf</h2>
-            <p className="text-muted-foreground">
-              I'm your speech-driven web assistant. Ask me to search the web, check your email,
-              read news, or help you with any browsing tasks. You can type or use voice commands.
-            </p>
-            <div className="mt-6 space-y-2 text-left">
-              <p className="text-sm font-medium">Try asking:</p>
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>• "Search for the latest news on AI"</li>
-                <li>• "Check the weather forecast"</li>
-                <li>• "Help me find a recipe for pasta"</li>
-              </ul>
+          <div className="text-center space-y-6 max-w-lg px-6">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+              <svg className="h-8 w-8 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-semibold tracking-tight">Welcome to Surf</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                Your AI-powered web assistant. Ask me to browse the web, find information,
+                or complete tasks. Type below or use your voice.
+              </p>
+            </div>
+            <div className="grid gap-2 pt-2">
+              {[
+                'Search for the latest news on AI',
+                'Check the weather forecast',
+                'Help me find a recipe for pasta'
+              ].map((suggestion) => (
+                <div
+                  key={suggestion}
+                  className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground text-left hover:bg-muted/60 transition-colors cursor-default"
+                >
+                  "{suggestion}"
+                </div>
+              ))}
             </div>
           </div>
         </div>

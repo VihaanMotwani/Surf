@@ -105,39 +105,45 @@ export function ChatInput() {
   const isDisabled = isLoading || !sessionId
 
   return (
-    <div className="border-t bg-background p-4">
+    <div className="border-t bg-background/80 backdrop-blur-sm px-4 py-3">
       <div className="mx-auto max-w-4xl">
         <form
           onSubmit={(e) => {
             e.preventDefault()
             handleSend()
           }}
-          className="flex items-center space-x-2"
+          className="flex items-center gap-2"
         >
-          <Input
-            ref={inputRef}
-            type="text"
-            placeholder={
-              isRecording
-                ? 'Recording... click stop to send'
-                : !sessionId
-                  ? 'Connecting to server...'
-                  : 'Type your message or use voice input...'
-            }
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isDisabled || isRecording}
-            className="flex-1"
-            aria-label="Chat message input"
-          />
+          <div className="relative flex-1">
+            <Input
+              ref={inputRef}
+              type="text"
+              placeholder={
+                isRecording
+                  ? 'Recording... click stop to send'
+                  : !sessionId
+                    ? 'Connecting to server...'
+                    : 'Message Surf...'
+              }
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isDisabled || isRecording}
+              className="h-11 rounded-xl bg-muted/50 border-border/50 pr-12 focus-visible:bg-background focus-visible:ring-1"
+              aria-label="Chat message input"
+            />
+          </div>
 
           <Button
             type="button"
-            variant={isRecording ? 'destructive' : 'outline'}
+            variant="ghost"
             size="icon"
             onClick={handleVoiceInput}
             disabled={isDisabled && !isRecording}
+            className={isRecording
+              ? 'h-11 w-11 rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90'
+              : 'h-11 w-11 rounded-xl text-muted-foreground hover:text-foreground'
+            }
             aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
           >
             {isRecording ? (
@@ -150,6 +156,8 @@ export function ChatInput() {
           <Button
             type="submit"
             disabled={!input.trim() || isDisabled}
+            className="h-11 w-11 rounded-xl p-0"
+            size="icon"
             aria-label="Send message"
           >
             {isLoading ? (
@@ -159,10 +167,6 @@ export function ChatInput() {
             )}
           </Button>
         </form>
-
-        <p className="mt-2 text-xs text-center text-muted-foreground">
-          Press Enter to send | Click mic to use voice input
-        </p>
       </div>
     </div>
   )

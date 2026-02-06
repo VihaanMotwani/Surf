@@ -73,3 +73,45 @@ def stream_assistant_text(messages: list[Message], memory_context: str = "") -> 
             delta = getattr(event, "delta", "")
             if delta:
                 yield delta
+
+
+DESCRIBE_SYSTEM_PROMPT = (
+    "You are a helpful assistant describing what is visible on a browser screen. "
+    "Describe the page contents in detail, as if explaining to someone who cannot see it. "
+    "Mention key UI elements, text content, images, and layout."
+)
+
+DESCRIBE_KEYWORDS = ["describe what you see", "describe that", "describe the screen", "what do you see", "what's on the screen", "what is on the screen"]
+
+
+def is_describe_request(text: str) -> bool:
+    """Check if the user message is asking to describe the screen."""
+    lower = text.lower().strip()
+    return any(kw in lower for kw in DESCRIBE_KEYWORDS)
+
+
+def stream_describe_screenshot(screenshot_b64: str, user_prompt: str) -> Iterable[str]:
+    """Send a screenshot to the vision model and stream the description."""
+    input_messages = [
+        {"role": "system", "content": DESCRIBE_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": user_prompt or "Describe what you see on this screen."},
+                {
+                    "type": "input_image",
+                    "image_url": f"data:image/png;base64,{screenshot_b64}",
+                },
+            ],
+        },
+    ]
+    stream = client.responses.create(
+        model=settings.openai_model,
+        input=input_messages,
+        stream=True,
+    )
+    for event in stream:
+        if getattr(event, "type", None) == "response.output_text.delta":
+            delta = getattr(event, "delta", "")
+            if delta:
+                yield delta

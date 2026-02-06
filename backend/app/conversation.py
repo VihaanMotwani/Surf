@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from app.config import settings
 from app.crud import add_message, create_task, list_messages
 from app.llm import generate_assistant_text, parse_task_prompt
+from app.local_memory import extract_and_store_facts, get_memory_context as get_local_memory_context
 from app.memory import ZepMemory, create_memory
 from app.models import Session
 from app.schemas import ChatResponse, MessageResponse
@@ -53,8 +54,10 @@ async def handle_user_message(db: AsyncSession, session: Session, content: str) 
     if running:
         return running
 
-    # Fetch Zep context for LLM enrichment
-    memory_context = zep.get_context() if zep else ""
+    # Fetch memory context for LLM enrichment (always include local facts)
+    local_ctx = await get_local_memory_context()
+    zep_ctx = zep.get_context() if zep else ""
+    memory_context = "\n\n".join(filter(None, [zep_ctx, local_ctx]))
 
     messages = await list_messages(db, session.id)
     try:
@@ -79,5 +82,9 @@ async def handle_user_message(db: AsyncSession, session: Session, content: str) 
         await db.commit()
 
     msg = await add_message(db, session.id, "assistant", assistant_text)
+
+    # Background fact extraction (fire-and-forget)
+    asyncio.create_task(extract_and_store_facts(content, assistant_text, session_id=str(session.id)))
+
     assistant_msg = MessageResponse(id=msg.id, role=msg.role, content=msg.content, created_at=msg.created_at)
     return ChatResponse(assistant_message=assistant_msg, task_id=task_id)

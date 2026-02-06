@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, JSON, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -13,6 +13,7 @@ class Session(Base):
     __tablename__ = "sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    title: Mapped[str | None] = mapped_column(String(256), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="idle", index=True)
     pending_task_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -93,3 +94,21 @@ class Artifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     task: Mapped[Task] = relationship(back_populates="artifacts")
+
+
+class Fact(Base):
+    __tablename__ = "facts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    fact_type: Mapped[str] = mapped_column(String(32), default="fact", index=True)
+    content: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    subject: Mapped[str] = mapped_column(String(128), default="")
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )

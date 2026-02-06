@@ -9,9 +9,19 @@ interface ChatState {
   updateMessage: (id: string, content: string) => void
   appendToMessage: (id: string, chunk: string) => void
   setStreamingStatus: (id: string, isStreaming: boolean) => void
+  setTaskInfo: (
+    messageId: string,
+    taskId: string,
+    status: 'running' | 'succeeded' | 'failed',
+    result?: Record<string, unknown>
+  ) => void
   clearMessages: () => void
   setLoading: (isLoading: boolean) => void
   setSessionId: (id: string | null) => void
+  loadSession: (
+    sessionId: string,
+    messages: Array<{ id: string; role: string; content: string; created_at?: string }>
+  ) => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -45,8 +55,27 @@ export const useChatStore = create<ChatState>((set) => ({
       )
     })),
 
+  setTaskInfo: (messageId, taskId, status, result) =>
+    set((state) => ({
+      messages: state.messages.map((msg) =>
+        msg.id === messageId ? { ...msg, taskId, taskStatus: status, taskResult: result } : msg
+      )
+    })),
+
   clearMessages: () => set({ messages: [], sessionId: null }),
 
   setLoading: (isLoading) => set({ isLoading }),
-  setSessionId: (sessionId) => set({ sessionId })
+  setSessionId: (sessionId) => set({ sessionId }),
+
+  loadSession: (sessionId, messages) =>
+    set({
+      sessionId,
+      messages: messages.map((m) => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        isStreaming: false
+      }))
+    })
 }))

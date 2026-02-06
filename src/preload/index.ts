@@ -14,6 +14,10 @@ export interface ElectronAPI {
   onStreamError: (callback: (error: string) => void) => () => void
   onTranscription: (callback: (data: { text: string }) => void) => () => void
 
+  // Task methods
+  getTaskStatus: (taskId: string) => Promise<{ id: string; status: string; error?: string }>
+  getTaskEvents: (taskId: string) => Promise<Array<{ id: number; type: string; payload: Record<string, unknown> }>>
+
   // Session methods
   createSession: () => Promise<{ id: string; status: string }>
 
@@ -74,6 +78,12 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.CHAT_TRANSCRIPTION, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_TRANSCRIPTION, listener)
   },
+
+  // Tasks
+  getTaskStatus: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_GET_STATUS, taskId),
+  getTaskEvents: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_GET_EVENTS, taskId),
 
   // Sessions
   createSession: () => ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE),

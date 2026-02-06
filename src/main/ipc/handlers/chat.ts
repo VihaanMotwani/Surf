@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../channels'
-import { apiPostStream, apiPostAudioStream } from '../../api'
+import { apiGet, apiPostStream, apiPostAudioStream } from '../../api'
 
 function sendToRenderer(channel: string, data: unknown): void {
   const win = BrowserWindow.getAllWindows()[0]
@@ -104,6 +104,16 @@ export function registerChatHandlers(): void {
       return { id: assistantId }
     }
   )
+
+  // Get task status
+  ipcMain.handle(IPC_CHANNELS.TASK_GET_STATUS, async (_event, taskId: string) => {
+    return apiGet(`/tasks/${taskId}`)
+  })
+
+  // Get task events (for result details)
+  ipcMain.handle(IPC_CHANNELS.TASK_GET_EVENTS, async (_event, taskId: string) => {
+    return apiGet(`/tasks/${taskId}/events`)
+  })
 
   // Get chat history
   ipcMain.handle(IPC_CHANNELS.CHAT_GET_HISTORY, async () => {

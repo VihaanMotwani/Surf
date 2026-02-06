@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { ChatMessages } from './ChatMessages'
 import { ChatInput } from './ChatInput'
 import { useChatStore } from '@/store/chat'
@@ -9,13 +9,14 @@ import { useToast } from '@/components/ui/use-toast'
 
 export function ChatInterface() {
   const electron = useIPC()
-  const { sessionId, addMessage, appendToMessage, setStreamingStatus, setSessionId, setLoading } =
+  const { sessionId, addMessage, appendToMessage, setStreamingStatus, setTaskInfo, setSessionId, setLoading, loadSession } =
     useChatStore()
   const { speak } = useSpeech()
   const settings = useSettingsStore()
   const { toast } = useToast()
   const sessionCreatingRef = useRef(false)
   const messagesRef = useRef(useChatStore.getState().messages)
+  const taskPollIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   // Keep ref in sync with store
   useEffect(() => {
@@ -24,12 +25,33 @@ export function ChatInterface() {
     })
   }, [])
 
-  // Create a backend session on mount
+  // Load last session or create new one on mount only
+  const hasInitialized = useRef(false)
   useEffect(() => {
+    if (hasInitialized.current) return
     const ensureSession = async () => {
       if (sessionId || sessionCreatingRef.current) return
       sessionCreatingRef.current = true
+      hasInitialized.current = true
       try {
+        // Try to load the most recent session
+        const sessions = (await electron.getAllSessions()) as Array<{
+          id: string
+          title: string | null
+          message_count: number
+        }>
+        if (sessions.length > 0) {
+          const latest = sessions[0] // already sorted by updated_at DESC
+          if (latest.message_count > 0) {
+            const fullSession = (await electron.getSessionById(latest.id)) as {
+              id: string
+              messages: Array<{ id: string; role: string; content: string; created_at?: string }>
+            }
+            loadSession(fullSession.id, fullSession.messages)
+            return
+          }
+        }
+        // No existing sessions with messages — create a new one
         const session = await electron.createSession()
         setSessionId(session.id)
       } catch {
@@ -43,7 +65,71 @@ export function ChatInterface() {
       }
     }
     ensureSession()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // When sessionId becomes null (e.g. New Chat), create a fresh session
+  useEffect(() => {
+    if (sessionId !== null || !hasInitialized.current || sessionCreatingRef.current) return
+    sessionCreatingRef.current = true
+    electron.createSession()
+      .then((session) => setSessionId(session.id))
+      .catch(() => {
+        toast({
+          variant: 'destructive',
+          title: 'Connection Error',
+          description: 'Could not create a new session.'
+        })
+      })
+      .finally(() => { sessionCreatingRef.current = false })
   }, [sessionId, electron, setSessionId, toast])
+
+  const startTaskPolling = useCallback(
+    (messageId: string, taskId: string) => {
+      setTaskInfo(messageId, taskId, 'running')
+
+      const interval = setInterval(async () => {
+        try {
+          const task = await electron.getTaskStatus(taskId)
+          if (task.status === 'succeeded' || task.status === 'failed') {
+            clearInterval(interval)
+            taskPollIntervals.current.delete(taskId)
+
+            let result: Record<string, unknown> = {}
+            if (task.status === 'failed' && task.error) {
+              result = { error: task.error }
+            } else {
+              // Fetch events to get the result payload
+              try {
+                const events = await electron.getTaskEvents(taskId)
+                const resultEvent = events.find((e) => e.type === 'result')
+                if (resultEvent?.payload) {
+                  result = resultEvent.payload
+                }
+              } catch {
+                result = { final_result: 'Task completed' }
+              }
+            }
+
+            setTaskInfo(messageId, taskId, task.status as 'succeeded' | 'failed', result)
+          }
+        } catch {
+          // Backend might be temporarily unavailable, keep polling
+        }
+      }, 2000)
+
+      taskPollIntervals.current.set(taskId, interval)
+    },
+    [electron, setTaskInfo]
+  )
+
+  // Cleanup polling intervals on unmount
+  useEffect(() => {
+    return () => {
+      taskPollIntervals.current.forEach((interval) => clearInterval(interval))
+      taskPollIntervals.current.clear()
+    }
+  }, [])
 
   // Set up streaming + transcription listeners
   useEffect(() => {
@@ -64,6 +150,11 @@ export function ChatInterface() {
     const unsubEnd = electron.onStreamEnd((data) => {
       setStreamingStatus(data.id, false)
       setLoading(false)
+
+      // Start polling if a browser task was launched
+      if (data.taskId) {
+        startTaskPolling(data.id, data.taskId)
+      }
 
       // Auto-speak if enabled
       if (settings.autoSpeak) {
@@ -99,7 +190,7 @@ export function ChatInterface() {
       unsubError()
       unsubTranscription()
     }
-  }, [electron, addMessage, appendToMessage, setStreamingStatus, setLoading, speak, settings.autoSpeak, toast])
+  }, [electron, addMessage, appendToMessage, setStreamingStatus, setLoading, speak, settings.autoSpeak, toast, startTaskPolling])
 
   return (
     <div className="flex h-full flex-col">
