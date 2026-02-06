@@ -1,3 +1,9 @@
+.venv/
 .env
+__pycache__/
+*.egg-info/
+*.db
+*.db-wal
+*.db-shm.env
 .venv
 venv
