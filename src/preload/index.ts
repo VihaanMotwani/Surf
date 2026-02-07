@@ -4,13 +4,13 @@ import { IPC_CHANNELS } from '../main/ipc/channels'
 // Type definitions for the exposed API
 export interface ElectronAPI {
   // Chat methods
-  sendMessage: (sessionId: string, message: string, assistantId?: string) => Promise<{ id: string }>
+  sendMessage: (sessionId: string, message: string, assistantId?: string, options?: { silent?: boolean }) => Promise<{ id: string }>
   sendAudio: (sessionId: string, audioBuffer: ArrayBuffer, mimeType: string) => Promise<{ id: string }>
   getChatHistory: () => Promise<unknown[]>
   clearChatHistory: () => Promise<{ success: boolean }>
   onStreamStart: (callback: (messageId: string) => void) => () => void
   onStreamChunk: (callback: (data: { id: string; chunk: string }) => void) => () => void
-  onStreamEnd: (callback: (data: { id: string; taskPrompt: string | null; taskId: string | null }) => void) => () => void
+  onStreamEnd: (callback: (data: { id: string; taskPrompt: string | null; taskId: string | null; silent?: boolean }) => void) => () => void
   onStreamError: (callback: (error: string) => void) => () => void
   onTranscription: (callback: (data: { text: string }) => void) => () => void
 
@@ -55,8 +55,8 @@ export interface ElectronAPI {
 
 const electronAPI: ElectronAPI = {
   // Chat
-  sendMessage: (sessionId: string, message: string, assistantId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CHAT_SEND_MESSAGE, sessionId, message, assistantId),
+  sendMessage: (sessionId: string, message: string, assistantId?: string, options?: { silent?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHAT_SEND_MESSAGE, sessionId, message, assistantId, options),
   sendAudio: (sessionId: string, audioBuffer: ArrayBuffer, mimeType: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHAT_SEND_AUDIO, sessionId, audioBuffer, mimeType),
   getChatHistory: () => ipcRenderer.invoke(IPC_CHANNELS.CHAT_GET_HISTORY),
@@ -72,7 +72,7 @@ const electronAPI: ElectronAPI = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_CHUNK, listener)
   },
   onStreamEnd: (callback) => {
-    const listener = (_e: Electron.IpcRendererEvent, data: { id: string; taskPrompt: string | null; taskId: string | null }) => callback(data)
+    const listener = (_e: Electron.IpcRendererEvent, data: { id: string; taskPrompt: string | null; taskId: string | null; silent?: boolean }) => callback(data)
     ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_END, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_END, listener)
   },

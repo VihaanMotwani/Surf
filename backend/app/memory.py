@@ -54,20 +54,45 @@ class ZepMemory:
 
     def get_context(self) -> str:
         """
-        Retrieve the Zep context block for the current thread.
+        Retrieve the Zep context block for the current user.
 
-        Returns a formatted string containing user summary and relevant facts
-        from across all sessions.
+        Returns a formatted string containing:
+        - Thread-level user context (if available)
+        - User's knowledge graph facts (preferences, previous tasks, etc.)
         """
-        if not self.thread_id:
-            return ""
+        context_parts = []
 
+        # 1. Try to get thread-level context
+        if self.thread_id:
+            try:
+                user_context = self.client.thread.get_user_context(thread_id=self.thread_id)
+                if user_context.context:
+                    context_parts.append(f"User Summary:\n{user_context.context}")
+            except Exception as e:
+                logger.debug(f"No thread context available: {e}")
+
+        # 2. Get user's knowledge graph facts (these persist across sessions)
         try:
-            user_context = self.client.thread.get_user_context(thread_id=self.thread_id)
-            return user_context.context or ""
+            search_results = self.client.graph.search(
+                user_id=self.user_id,
+                query="user information preferences facts history",
+                limit=20
+            )
+            
+            if hasattr(search_results, 'edges') and search_results.edges:
+                facts = []
+                for edge in search_results.edges[:15]:  # Limit to avoid context bloat
+                    fact = edge.fact if hasattr(edge, 'fact') else str(edge)
+                    if fact:
+                        facts.append(f"- {fact}")
+                
+                if facts:
+                    context_parts.append(f"Known Facts About User:\n" + "\n".join(facts))
+                    
         except Exception as e:
-            logger.warning(f"Error retrieving context: {e}")
-            return ""
+            logger.debug(f"No graph facts available: {e}")
+
+        return "\n\n".join(context_parts) if context_parts else ""
 
     def add_message(self, role: str, content: str, name: Optional[str] = None) -> None:
         """
@@ -135,6 +160,26 @@ class ZepMemory:
             )
         except Exception as e:
             logger.warning(f"Error adding preference: {e}")
+
+    def store_extracted_facts(self, facts: list) -> None:
+        """
+        Store LLM-extracted facts to the knowledge graph.
+
+        Args:
+            facts: List of MemoryFact objects with fact_type and content
+        """
+        for fact in facts:
+            try:
+                # Format: content (clean natural language helps Zep deduplication)
+                fact_text = fact.content
+                self.client.graph.add(
+                    user_id=self.user_id,
+                    type="text",
+                    data=fact_text,
+                )
+                logger.info(f"Stored extracted fact: {fact_text[:80]}...")
+            except Exception as e:
+                logger.warning(f"Error storing extracted fact: {e}")
 
 
 def create_memory(api_key: str | None, user_id: str = "surf_local_user", user_name: str = "User") -> ZepMemory | None:

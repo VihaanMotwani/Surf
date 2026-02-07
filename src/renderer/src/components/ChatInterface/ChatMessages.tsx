@@ -1,16 +1,27 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { useChatStore } from '@/store/chat'
 import { MessageBubble } from './MessageBubble'
 
 export function ChatMessages() {
   const { messages } = useChatStore()
+
+  // Sort messages by sequence number (or timestamp as fallback) to ensure correct order
+  const sortedMessages = useMemo(() =>
+    [...messages].sort((a, b) => {
+      // Use seq if available, otherwise fall back to timestamp
+      const aOrder = a.seq ?? a.timestamp
+      const bOrder = b.seq ?? b.timestamp
+      return aOrder - bOrder
+    }),
+    [messages]
+  )
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [sortedMessages])
 
   return (
     <div
@@ -20,7 +31,7 @@ export function ChatMessages() {
       aria-live="polite"
       aria-label="Chat messages"
     >
-      {messages.length === 0 ? (
+      {sortedMessages.length === 0 ? (
         <div className="flex h-full items-center justify-center">
           <div className="text-center space-y-6 max-w-lg px-6">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
@@ -55,7 +66,7 @@ export function ChatMessages() {
         </div>
       ) : (
         <div className="space-y-4 max-w-4xl mx-auto">
-          {messages.map((message) => (
+          {sortedMessages.map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}
           <div ref={messagesEndRef} />

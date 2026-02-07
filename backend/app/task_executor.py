@@ -61,7 +61,7 @@ async def capture_screenshot_b64(session_id: str | None = None) -> str | None:
     return None
 
 
-async def _finalize_success(task_id: str, session_id: str, history):
+async def _finalize_success(task_id: str, session_id: str, history, skip_summary: bool = False):
     payload = None
     async with AsyncSessionLocal() as db:
         async with db.begin():
@@ -93,9 +93,9 @@ async def _finalize_success(task_id: str, session_id: str, history):
             if session:
                 session.status = "task_completed"
 
-    # Generate summary after DB commit completes
-    # Note: payload variable still in scope from above
-    await _generate_completion_summary(task_id, session_id, payload)
+    # Generate summary after DB commit completes (skip for Realtime API)
+    if not skip_summary:
+        await _generate_completion_summary(task_id, session_id, payload)
 
 
 async def _generate_completion_summary(task_id: str, session_id: str, result_summary: dict):
@@ -144,8 +144,22 @@ async def _emit_event(task_id: str, event_type: str, payload: dict):
             db.add(TaskEvent(task_id=task_id, type=event_type, payload=payload))
 
 
-async def execute_task_background(task_id: str, session_id: str, prompt: str):
-    """Run a browser-use task in-process and finalize results in DB."""
+async def execute_task_background(
+    task_id: str, 
+    session_id: str, 
+    prompt: str,
+    on_step_callback=None,
+    skip_summary: bool = False
+):
+    """Run a browser-use task in-process and finalize results in DB.
+    
+    Args:
+        task_id: The task ID
+        session_id: The session ID
+        prompt: The task prompt
+        on_step_callback: Optional async callback for each step (receives step_data dict)
+        skip_summary: If True, skip generating the LLM summary (e.g. for Realtime API)
+    """
     # Mark task as running
     async with AsyncSessionLocal() as db:
         async with db.begin():
@@ -184,11 +198,17 @@ async def execute_task_background(task_id: str, session_id: str, prompt: str):
             enriched_prompt = f"{previous_context}\n\n---\nNEW TASK: {prompt}"
             logger.info(f"Enriched task with previous browser context for session {session_id}")
 
+        # Define step callback - emit to DB and optionally call custom callback
+        async def step_handler(step_data):
+            await _emit_event(task_id, "step", step_data)
+            if on_step_callback:
+                await on_step_callback(step_data)
+
         logger.info(f"Executing task {task_id} with browser for session {session_id}")
         history = await run_browser_use_task(
             enriched_prompt,
             browser=browser,  # Pass existing browser to reuse it
-            on_step_callback=lambda step_data: asyncio.create_task(_emit_event(task_id, "step", step_data))
+            on_step_callback=lambda step_data: asyncio.create_task(step_handler(step_data))
         )
 
         # Store browser context for next task in this session
@@ -205,7 +225,7 @@ async def execute_task_background(task_id: str, session_id: str, prompt: str):
                 logger.warning(f"Failed to capture browser context: {e}")
 
         logger.info(f"Task {task_id} completed successfully, browser remains alive for session {session_id}")
-        await _finalize_success(task_id, session_id, history)
+        await _finalize_success(task_id, session_id, history, skip_summary=skip_summary)
     except Exception as exc:
         logger.exception("Task %s failed", task_id)
         await _finalize_failure(task_id, session_id, str(exc))

@@ -63,19 +63,10 @@ async def run_browser_use_task(task_prompt: str, browser: Browser | None = None,
         else:
             history = await agent.run()
 
-        # Store browser result in Zep
-        if zep:
-            final_result = history.final_result() if history else ""
-            zep.store_browser_result(
-                task=task_prompt,
-                result=str(final_result) if final_result else "Task completed",
-                success=True,
-            )
-
         return history
     except Exception:
-        if zep:
-            zep.store_browser_result(task=task_prompt, result="", success=False)
+        # if zep:
+        #     zep.store_browser_result(task=task_prompt, result="", success=False)
         raise
     finally:
         if owns_browser:

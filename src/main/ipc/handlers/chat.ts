@@ -9,7 +9,7 @@ function sendToRenderer(channel: string, data: unknown): void {
 
 function handleSSE(
   assistantId: string,
-  event: { type: string; [key: string]: unknown }
+  event: { type: string;[key: string]: unknown }
 ): void {
   if (event.type === 'delta') {
     sendToRenderer(IPC_CHANNELS.CHAT_STREAM_CHUNK, {
@@ -41,7 +41,7 @@ export function registerChatHandlers(): void {
   // Send text message — streams response via SSE events
   ipcMain.handle(
     IPC_CHANNELS.CHAT_SEND_MESSAGE,
-    async (_event, sessionId: string, message: string, assistantId?: string) => {
+    async (_event, sessionId: string, message: string, assistantId?: string, options?: { silent?: boolean }) => {
       const id = assistantId || `assistant-${Date.now()}`
 
       // Only send STREAM_START if the renderer didn't pre-create the placeholder
@@ -53,7 +53,18 @@ export function registerChatHandlers(): void {
         await apiPostStream(
           `/sessions/${sessionId}/messages/stream`,
           { content: message },
-          (sseEvent) => handleSSE(id, sseEvent)
+          (sseEvent) => {
+            if (sseEvent.type === 'done') {
+              sendToRenderer(IPC_CHANNELS.CHAT_STREAM_END, {
+                id,
+                taskPrompt: sseEvent.task_prompt ?? null,
+                taskId: sseEvent.task_id ?? null,
+                silent: options?.silent
+              })
+            } else {
+              handleSSE(id, sseEvent)
+            }
+          }
         )
       } catch (err) {
         sendToRenderer(

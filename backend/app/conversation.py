@@ -88,8 +88,9 @@ async def handle_user_message(db: AsyncSession, session: Session, content: str) 
 
     msg = await add_message(db, session.id, "assistant", assistant_text)
 
-    # Background fact extraction (fire-and-forget)
-    asyncio.create_task(extract_and_store_facts(content, assistant_text, session_id=str(session.id)))
+    # Background fact extraction (fire-and-forget) - only if Zep is NOT configured
+    if not settings.zep_api_key:
+        asyncio.create_task(extract_and_store_facts(content, assistant_text, session_id=str(session.id)))
 
     assistant_msg = MessageResponse(id=msg.id, role=msg.role, content=msg.content, created_at=msg.created_at)
     return ChatResponse(assistant_message=assistant_msg, task_id=task_id)
@@ -146,7 +147,12 @@ async def create_assistant_message_for_task_completion(
     })
 
     # Trigger TTS for the summary (fire and forget)
-    asyncio.create_task(_synthesize_and_broadcast_audio(session_id, summary_text, str(msg.id)))
+    # Skip if the task was initiated silently (e.g. via Realtime API)
+    task_prompt = task_result.get("prompt", "")
+    if "[SILENT]" not in task_prompt:
+        asyncio.create_task(_synthesize_and_broadcast_audio(session_id, summary_text, str(msg.id)))
+    else:
+        logger.info(f"Skipping TTS for task {task_id} due to [SILENT] marker")
 
 
 async def _synthesize_and_broadcast_audio(session_id: str, text: str, message_id: str):

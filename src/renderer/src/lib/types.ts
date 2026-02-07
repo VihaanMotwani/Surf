@@ -5,6 +5,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
+  seq?: number  // Sequence number for ordering (more reliable than timestamp)
   isStreaming?: boolean
   taskId?: string
   taskStatus?: 'running' | 'succeeded' | 'failed'

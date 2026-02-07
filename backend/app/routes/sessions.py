@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.conversation import handle_user_message, check_task_running
+from app.config import settings
 from app.crud import add_message, create_session, delete_session, get_latest_task_result, get_session, list_messages, list_sessions
 from app.db import AsyncSessionLocal, get_db
 from app.llm import TASK_PROMPT_MARKERS, client as openai_client, is_describe_request, parse_task_prompt, stream_assistant_text, stream_describe_screenshot
@@ -358,8 +359,9 @@ async def add_message_stream_endpoint(
                 # Yield done event BEFORE starting background task
                 yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
 
-                # Background fact extraction
-                asyncio.create_task(extract_and_store_facts(user_content, assistant_text, session_id=str(session_id)))
+                # Background fact extraction - only if Zep is NOT configured
+                if not settings.zep_api_key:
+                    asyncio.create_task(extract_and_store_facts(user_content, assistant_text, session_id=str(session_id)))
 
                 # Start task in background AFTER response is sent
                 if task_id and task_prompt:
@@ -609,8 +611,9 @@ async def add_audio_message_stream_endpoint(
                 # Yield done event BEFORE starting background task
                 yield f"data: {json.dumps({'type': 'done', 'message_id': str(msg.id), 'task_prompt': task_prompt, 'task_id': str(task_id) if task_id else None})}\n\n"
 
-                # Background fact extraction
-                asyncio.create_task(extract_and_store_facts(audio_user_content, assistant_text, session_id=str(session_id)))
+                # Background fact extraction - only if Zep is NOT configured
+                if not settings.zep_api_key:
+                    asyncio.create_task(extract_and_store_facts(audio_user_content, assistant_text, session_id=str(session_id)))
 
                 # Start task in background AFTER response is sent
                 if task_id and task_prompt:

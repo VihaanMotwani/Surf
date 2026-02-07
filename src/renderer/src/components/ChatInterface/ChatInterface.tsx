@@ -30,7 +30,7 @@ export function ChatInterface() {
   useEffect(() => {
     if (hasInitialized.current) return
     const ensureSession = async () => {
-      if (sessionId || sessionCreatingRef.current) return
+      if (sessionCreatingRef.current) return
       sessionCreatingRef.current = true
       hasInitialized.current = true
       try {
@@ -65,7 +65,7 @@ export function ChatInterface() {
       }
     }
     ensureSession()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // When sessionId becomes null (e.g. New Chat), create a fresh session
@@ -160,7 +160,7 @@ export function ChatInterface() {
       }
 
       // Auto-speak if enabled
-      if (settings.autoSpeak) {
+      if (settings.autoSpeak && !data.silent) {
         const message = messagesRef.current.find((m) => m.id === data.id)
         if (message) speak(message.content)
       }

@@ -74,40 +74,60 @@ async def get_knowledge_graph():
     if _is_zep_configured():
         try:
             memory = get_memory_client()
-            search_results = memory.client.graph.search(
-                user_id=memory.user_id,
-                query="*",
-                limit=50
-            )
+            
+            # Get actual graph nodes from Zep
+            zep_nodes = memory.client.graph.node.get_by_user_id(user_id=memory.user_id)
+            zep_edges = memory.client.graph.edge.get_by_user_id(user_id=memory.user_id)
 
-            if hasattr(search_results, 'episodes') and search_results.episodes:
-                edge_offset = len(edges)
-                for idx, episode in enumerate(search_results.episodes):
-                    node_id = f"episode_{idx}"
-                    content = episode.content if hasattr(episode, 'content') else str(episode)
-                    episode_type = episode.type if hasattr(episode, 'type') else "fact"
-                    node_type = _classify_node_type(content, episode_type)
+            # Add Zep nodes
+            if zep_nodes:
+                # Deduplicate User node: If Zep has the user, remove the local user node
+                # matching the configured user_name to avoid "Two Royces"
+                zep_user_found = False
+                for zep_node in zep_nodes:
+                    label = zep_node.name if hasattr(zep_node, 'name') else str(zep_node)
+                    if label == user_name:
+                        zep_user_found = True
+                        break
+                
+                if zep_user_found:
+                    nodes = [n for n in nodes if n.label != user_name]
 
+                for zep_node in zep_nodes:
+                    node_id = f"zep_node_{zep_node.uuid_}" if hasattr(zep_node, 'uuid_') else f"zep_node_{id(zep_node)}"
+                    label = zep_node.name if hasattr(zep_node, 'name') else str(zep_node)
+                    node_type = _classify_node_type(label, "entity")
+                    
                     nodes.append(GraphNode(
                         id=node_id,
-                        label=_extract_label(content),
+                        label=_extract_label(label),
                         type=node_type,
                         size=15,
                         color=_get_node_color(node_type),
                         metadata={
-                            "content": content,
-                            "created_at": episode.created_at if hasattr(episode, 'created_at') else None,
-                            "episode_type": episode_type,
+                            "uuid": zep_node.uuid_ if hasattr(zep_node, 'uuid_') else None,
+                            "created_at": str(zep_node.created_at) if hasattr(zep_node, 'created_at') else None,
+                            "summary": zep_node.summary if hasattr(zep_node, 'summary') else None,
                             "source": "zep",
                         }
                     ))
+
+            # Add Zep edges (facts/relationships)
+            if zep_edges:
+                edge_offset = len(edges)
+                for idx, zep_edge in enumerate(zep_edges):
+                    source_id = f"zep_node_{zep_edge.source_node_uuid}" if hasattr(zep_edge, 'source_node_uuid') else "user_1"
+                    target_id = f"zep_node_{zep_edge.target_node_uuid}" if hasattr(zep_edge, 'target_node_uuid') else f"zep_edge_{idx}"
+                    fact = zep_edge.fact if hasattr(zep_edge, 'fact') else str(zep_edge)
+                    
                     edges.append(GraphEdge(
-                        id=f"edge_{edge_offset + idx}",
-                        source="user_1",
-                        target=node_id,
-                        label=_get_edge_label(node_type),
-                        type="relationship"
+                        id=f"zep_edge_{edge_offset + idx}",
+                        source=source_id,
+                        target=target_id,
+                        label=_extract_label(fact, max_length=30),
+                        type="fact"
                     ))
+                    
         except Exception as e:
             print(f"[KG] Zep fetch failed, using local only: {e}")
 

@@ -5,6 +5,7 @@ interface ChatState {
   messages: ChatMessage[]
   isLoading: boolean
   sessionId: string | null
+  messageSeq: number  // Monotonically increasing sequence for ordering
   addMessage: (message: ChatMessage) => void
   updateMessage: (id: string, content: string) => void
   appendToMessage: (id: string, chunk: string) => void
@@ -30,11 +31,28 @@ export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isLoading: false,
   sessionId: null,
+  messageSeq: 0,
 
   addMessage: (message) =>
-    set((state) => ({
-      messages: [...state.messages, message]
-    })),
+    set((state) => {
+      // Check for existing message with same ID
+      const existingIndex = state.messages.findIndex((m) => m.id === message.id)
+
+      if (existingIndex !== -1) {
+        // Update existing message
+        const updatedMessages = [...state.messages]
+        updatedMessages[existingIndex] = { ...updatedMessages[existingIndex], ...message }
+        return { messages: updatedMessages }
+      }
+
+      // Add new message
+      // Use provided seq (from backend order) or auto-assign from counter
+      const newSeq = message.seq ?? (state.messageSeq + 1)
+      return {
+        messageSeq: Math.max(state.messageSeq + 1, newSeq),
+        messages: [...state.messages, { ...message, seq: newSeq }]
+      }
+    }),
 
   updateMessage: (id, content) =>
     set((state) => ({
@@ -80,7 +98,7 @@ export const useChatStore = create<ChatState>((set) => ({
       )
     })),
 
-  clearMessages: () => set({ messages: [], sessionId: null }),
+  clearMessages: () => set({ messages: [], sessionId: null, messageSeq: 0 }),
 
   setLoading: (isLoading) => set({ isLoading }),
   setSessionId: (sessionId) => set({ sessionId }),
@@ -88,11 +106,13 @@ export const useChatStore = create<ChatState>((set) => ({
   loadSession: (sessionId, messages) =>
     set({
       sessionId,
-      messages: messages.map((m) => ({
+      messageSeq: messages.length,  // Set seq to count of loaded messages
+      messages: messages.map((m, index) => ({
         id: m.id,
         role: m.role as 'user' | 'assistant',
         content: m.content,
         timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        seq: index + 1,  // Assign seq based on load order
         isStreaming: false
       }))
     })

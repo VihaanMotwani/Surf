@@ -82,6 +82,9 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Surf needs access to your microphone to hear your voice commands."
+      },
       "target": [
         "dmg",
         "zip"
