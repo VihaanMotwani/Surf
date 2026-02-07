@@ -88,7 +88,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         </div>
 
         {message.taskId && message.taskStatus && (
-          <TaskStatusCard taskStatus={message.taskStatus} taskResult={message.taskResult} />
+          <TaskStatusCard
+            taskStatus={message.taskStatus}
+            taskResult={message.taskResult}
+            taskSteps={message.taskSteps as any}
+          />
         )}
       </div>
     </div>

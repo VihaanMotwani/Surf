@@ -17,6 +17,8 @@ export interface ElectronAPI {
   // Task methods
   getTaskStatus: (taskId: string) => Promise<{ id: string; status: string; error?: string }>
   getTaskEvents: (taskId: string) => Promise<Array<{ id: number; type: string; payload: Record<string, unknown> }>>
+  streamTaskEvents: (taskId: string) => Promise<void>
+  onTaskStreamEvent: (callback: (data: { taskId: string; event: Record<string, unknown> }) => void) => () => void
 
   // Session methods
   createSession: () => Promise<{ id: string; status: string }>
@@ -84,6 +86,13 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.TASK_GET_STATUS, taskId),
   getTaskEvents: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_GET_EVENTS, taskId),
+  streamTaskEvents: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_STREAM_EVENTS, taskId),
+  onTaskStreamEvent: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, data: { taskId: string; event: Record<string, unknown> }) => callback(data)
+    ipcRenderer.on(IPC_CHANNELS.TASK_STREAM_EVENT, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_STREAM_EVENT, listener)
+  },
 
   // Sessions
   createSession: () => ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE),

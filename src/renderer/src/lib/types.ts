@@ -9,6 +9,7 @@ export interface ChatMessage {
   taskId?: string
   taskStatus?: 'running' | 'succeeded' | 'failed'
   taskResult?: Record<string, unknown>
+  taskSteps?: Array<Record<string, unknown>>
 }
 
 export interface GraphNode {

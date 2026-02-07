@@ -52,6 +52,6 @@ __pycache__/
 .ruff_cache/
 
 # SQLite / local data
-*.db
+*.db*
 *.sqlite
 *.sqlite3

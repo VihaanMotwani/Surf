@@ -142,7 +142,7 @@ export function useAudioRecorder() {
         mediaRecorder.onstop = async () => {
           const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType })
           const buffer = await blob.arrayBuffer()
-          mediaRecorder.stream.getTracks().forEach((track) => track.stop())
+          mediaRecorder.stream.getTracks().forEach((track: MediaStreamTrack) => track.stop())
           setIsRecording(false)
           resolve({ buffer, mimeType: mediaRecorder.mimeType })
         }

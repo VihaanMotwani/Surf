@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../channels'
-import { apiGet, apiPostStream, apiPostAudioStream } from '../../api'
+import { apiGet, apiGetStream, apiPostStream, apiPostAudioStream } from '../../api'
 
 function sendToRenderer(channel: string, data: unknown): void {
   const win = BrowserWindow.getAllWindows()[0]
@@ -113,6 +113,23 @@ export function registerChatHandlers(): void {
   // Get task events (for result details)
   ipcMain.handle(IPC_CHANNELS.TASK_GET_EVENTS, async (_event, taskId: string) => {
     return apiGet(`/tasks/${taskId}/events`)
+  })
+
+  // Stream task events (for real-time progress updates)
+  ipcMain.handle(IPC_CHANNELS.TASK_STREAM_EVENTS, async (_event, taskId: string) => {
+    try {
+      await apiGetStream(
+        `/tasks/${taskId}/events/stream`,
+        (event) => {
+          sendToRenderer(IPC_CHANNELS.TASK_STREAM_EVENT, {
+            taskId,
+            event
+          })
+        }
+      )
+    } catch (err) {
+      console.error('Task stream error:', err)
+    }
   })
 
   // Get chat history

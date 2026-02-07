@@ -35,6 +35,8 @@ export const IPC_CHANNELS = {
   // Task channels
   TASK_GET_STATUS: 'task:get-status',
   TASK_GET_EVENTS: 'task:get-events',
+  TASK_STREAM_EVENTS: 'task:stream-events',
+  TASK_STREAM_EVENT: 'task:stream-event',
 
   // Settings channels
   SETTINGS_GET: 'settings:get',

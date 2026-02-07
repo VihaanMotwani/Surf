@@ -92,6 +92,13 @@ async def _finalize_failure(task_id: str, session_id: str, error_message: str):
                 session.status = "task_completed"
 
 
+async def _emit_event(task_id: str, event_type: str, payload: dict):
+    """Emit a task event to the database for streaming to frontend."""
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            db.add(TaskEvent(task_id=task_id, type=event_type, payload=payload))
+
+
 async def execute_task_background(task_id: str, session_id: str, prompt: str):
     """Run a browser-use task in-process and finalize results in DB."""
     # Mark task as running
@@ -110,7 +117,11 @@ async def execute_task_background(task_id: str, session_id: str, prompt: str):
         await browser.start()
         _active_browser = browser
         try:
-            history = await run_browser_use_task(prompt, browser=browser)
+            history = await run_browser_use_task(
+                prompt,
+                browser=browser,
+                on_step_callback=lambda step_data: asyncio.create_task(_emit_event(task_id, "step", step_data))
+            )
             await _finalize_success(task_id, session_id, history)
         finally:
             _active_browser = None

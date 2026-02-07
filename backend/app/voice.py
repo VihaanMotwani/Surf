@@ -146,7 +146,7 @@ class VoiceAgent:
             "session": {
                 "modalities": ["text", "audio"],
                 "instructions": self._build_system_prompt(),
-                "voice": "alloy",
+                "voice": "nova",
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
                 "input_audio_transcription": {

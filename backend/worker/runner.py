@@ -35,7 +35,7 @@ def to_jsonable(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
-async def run_browser_use_task(task_prompt: str, browser: Browser | None = None):
+async def run_browser_use_task(task_prompt: str, browser: Browser | None = None, on_step_callback=None):
     # Enrich the task prompt with Zep memory context
     zep = _get_zep()
     enriched_prompt = task_prompt
@@ -50,8 +50,18 @@ async def run_browser_use_task(task_prompt: str, browser: Browser | None = None)
         await browser.start()
     try:
         llm = ChatBrowserUse()
-        agent = Agent(task=enriched_prompt, llm=llm, browser=browser)
-        history = await agent.run()
+        agent = Agent(
+            task=enriched_prompt,
+            llm=llm,
+            browser=browser,
+            use_thinking=True  # Enable chain of thought
+        )
+
+        # Wrap the agent to stream steps if callback provided
+        if on_step_callback:
+            history = await _run_with_streaming(agent, on_step_callback)
+        else:
+            history = await agent.run()
 
         # Store browser result in Zep
         if zep:
@@ -72,6 +82,65 @@ async def run_browser_use_task(task_prompt: str, browser: Browser | None = None)
             await browser.stop()
 
 
+async def _run_with_streaming(agent, on_step_callback):
+    """Run the agent and stream step-by-step updates via callback."""
+    step_count = [0]  # Use list to allow mutation in nested function
+
+    async def on_step_end_handler(agent):
+        """Called by browser-use after each step completes."""
+        try:
+            history = agent.history
+            i = step_count[0]
+            step_count[0] += 1
+
+            if i >= len(history.history):
+                return
+
+            step = history.history[i]
+            step_data = {
+                "step": i + 1,
+                "url": getattr(step.state, "url", None) if step.state else None,
+                "page_title": getattr(step.state, "title", None) if step.state else None,
+            }
+
+            # Extract chain of thought (thinking)
+            if step.model_output and step.model_output.thinking:
+                step_data["thinking"] = step.model_output.thinking
+
+            # Extract thought/evaluation from model_thoughts
+            try:
+                thoughts = history.model_thoughts()
+                if i < len(thoughts) and thoughts[i]:
+                    thought = thoughts[i]
+                    step_data["evaluation"] = getattr(thought, "evaluation_previous_goal", None)
+                    step_data["next_goal"] = getattr(thought, "next_goal", None)
+                    step_data["memory"] = getattr(thought, "memory", None)
+            except Exception:
+                pass
+
+            # Add actions
+            if step.model_output and step.model_output.action:
+                actions = []
+                for action in step.model_output.action:
+                    try:
+                        actions.append(action.model_dump(exclude_none=True))
+                    except Exception:
+                        actions.append(str(action))
+                step_data["actions"] = actions
+
+            # Emit this step in real-time
+            if on_step_callback:
+                logger.info(f"Emitting step {i + 1} to frontend: {step_data.get('next_goal', 'N/A')}")
+                on_step_callback(step_data)
+        except Exception as exc:
+            logger.warning("Failed to emit step: %s", exc)
+
+    # Run the agent with the real-time step callback
+    history = await agent.run(on_step_end=on_step_end_handler)
+
+    return history
+
+
 def summarize_history(history) -> dict[str, Any]:
     """Build a rich summary from browser-use AgentHistoryList."""
     # Step-by-step breakdown with thoughts, actions, and results
@@ -87,7 +156,11 @@ def summarize_history(history) -> dict[str, Any]:
                 step["url"] = getattr(item.state, "url", None)
                 step["page_title"] = getattr(item.state, "title", None)
 
-            # Agent's thinking
+            # Chain of thought (thinking)
+            if item.model_output and item.model_output.thinking:
+                step["thinking"] = item.model_output.thinking
+
+            # Agent's thinking from model_thoughts
             if i < len(thoughts) and thoughts[i]:
                 thought = thoughts[i]
                 step["evaluation"] = getattr(thought, "evaluation_previous_goal", None)

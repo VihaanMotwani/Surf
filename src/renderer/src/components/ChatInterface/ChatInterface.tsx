@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/use-toast'
 
 export function ChatInterface() {
   const electron = useIPC()
-  const { sessionId, addMessage, appendToMessage, setStreamingStatus, setTaskInfo, setSessionId, setLoading, loadSession } =
+  const { sessionId, addMessage, appendToMessage, setStreamingStatus, setTaskInfo, addTaskStep, setSessionId, setLoading, loadSession } =
     useChatStore()
   const { speak } = useSpeech()
   const settings = useSettingsStore()
@@ -87,6 +87,9 @@ export function ChatInterface() {
   const startTaskPolling = useCallback(
     (messageId: string, taskId: string) => {
       setTaskInfo(messageId, taskId, 'running')
+
+      // Start streaming task events for real-time updates
+      electron.streamTaskEvents(taskId).catch(console.error)
 
       const interval = setInterval(async () => {
         try {
@@ -183,14 +186,24 @@ export function ChatInterface() {
       })
     })
 
+    // Handle task stream events (real-time step updates)
+    const unsubTaskStream = electron.onTaskStreamEvent(({ taskId, event }) => {
+      // Find the message associated with this task
+      const message = messagesRef.current.find((m) => m.taskId === taskId)
+      if (message && event.type === 'step') {
+        addTaskStep(message.id, event.payload as Record<string, unknown>)
+      }
+    })
+
     return () => {
       unsubStart()
       unsubChunk()
       unsubEnd()
       unsubError()
       unsubTranscription()
+      unsubTaskStream()
     }
-  }, [electron, addMessage, appendToMessage, setStreamingStatus, setLoading, speak, settings.autoSpeak, toast, startTaskPolling])
+  }, [electron, addMessage, appendToMessage, setStreamingStatus, setLoading, speak, settings.autoSpeak, toast, startTaskPolling, addTaskStep])
 
   return (
     <div className="flex h-full flex-col">
