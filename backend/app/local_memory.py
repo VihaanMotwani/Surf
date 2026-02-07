@@ -29,7 +29,7 @@ Return a JSON array of objects. Each object has:
 - "fact_type": one of "preference", "fact", "website", "task", "memory"
 - "confidence": float 0-1 indicating confidence this is a real, lasting fact
 
-Only extract facts that are personal to the user (preferences, habits, background, goals, etc.).
+Only extract facts that are personal to the user (preferences, habits, background, goals, contact details like email or phone, etc.).
 Do NOT extract transient conversational details or restate the assistant's response.
 If there are no facts to extract, return an empty array: []
 

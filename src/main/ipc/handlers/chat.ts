@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../channels'
-import { apiGet, apiGetStream, apiPostStream, apiPostAudioStream } from '../../api'
+import { apiGet, apiGetStream, apiPostStream, apiPostAudioStream, apiPostFile } from '../../api'
 
 function sendToRenderer(channel: string, data: unknown): void {
   const win = BrowserWindow.getAllWindows()[0]
@@ -113,6 +113,25 @@ export function registerChatHandlers(): void {
       }
 
       return { id: assistantId }
+    }
+  )
+
+  // Upload a file for browser-use tasks
+  ipcMain.handle(
+    IPC_CHANNELS.CHAT_UPLOAD_FILE,
+    async (_event, sessionId: string, fileBuffer: ArrayBuffer, mimeType: string, filename: string) => {
+      try {
+        const result = await apiPostFile(
+          `/sessions/${sessionId}/uploads`,
+          Buffer.from(fileBuffer),
+          mimeType,
+          filename
+        )
+        return { success: true, ...result }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to upload file'
+        return { success: false, error: message }
+      }
     }
   )
 

@@ -14,7 +14,8 @@ BASE_SYSTEM_PROMPT = (
     "briefly acknowledge what you will do and end your response with a separate line starting with "
     "TASK_PROMPT: followed by a short imperative task for a browser automation agent. "
     "Do not ask for confirmation — just proceed. "
-    "If no task should be run, do not include a TASK_PROMPT line."
+    "If no task should be run, do not include a TASK_PROMPT line. "
+    "If the user shares personal contact details (email, phone number), you may acknowledge it and it is allowed to be remembered."
 )
 
 TASK_PROMPT_MARKERS = ["\nTASK_PROMPT:", "TASK_PROMPT:"]

@@ -17,6 +17,7 @@ export function ChatInterface() {
   const sessionCreatingRef = useRef(false)
   const messagesRef = useRef(useChatStore.getState().messages)
   const taskPollIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const taskSummaryShown = useRef<Set<string>>(new Set())
 
   // Keep ref in sync with store
   useEffect(() => {
@@ -193,6 +194,20 @@ export function ChatInterface() {
       if (message && event.type === 'step') {
         addTaskStep(message.id, event.payload as Record<string, unknown>)
       }
+
+      if (event.type === 'result' && event.payload) {
+        const payload = event.payload as Record<string, unknown>
+        const finalResult = typeof payload.final_result === 'string' ? payload.final_result : null
+        const summaryText = finalResult || 'Task completed.'
+        addMessage({
+          id: `task-result-${taskId}`,
+          role: 'assistant',
+          content: summaryText,
+          timestamp: Date.now(),
+          taskId
+        })
+        taskSummaryShown.current.add(taskId)
+      }
     })
 
     return () => {
@@ -223,6 +238,10 @@ export function ChatInterface() {
         created_at: string
         is_auto_summary?: boolean
         task_id?: string
+      }
+
+      if (message.is_auto_summary && message.task_id && taskSummaryShown.current.has(message.task_id)) {
+        return
       }
 
       // Add the auto-summary message to the chat

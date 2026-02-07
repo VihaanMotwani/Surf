@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import threading
 from uuid import UUID
 
@@ -14,6 +15,8 @@ from app.crud import add_message, create_session, delete_session, get_latest_tas
 from app.db import AsyncSessionLocal, get_db
 from app.llm import TASK_PROMPT_MARKERS, client as openai_client, is_describe_request, parse_task_prompt, stream_assistant_text, stream_describe_screenshot
 from app.local_memory import extract_and_store_facts, get_memory_context as get_local_memory_context
+from app.uploads import clear_uploads
+from app.memory_extractor import extract_memory_facts
 from app.message_events import message_event_stream
 from app.models import Session as SessionModel
 from app.schemas import (
@@ -27,6 +30,8 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+logger = logging.getLogger(__name__)
 
 
 def _build_task_context(task_result: dict | None) -> str:
@@ -137,6 +142,7 @@ async def delete_session_endpoint(session_id: UUID, db: AsyncSession = Depends(g
     deleted = await delete_session(db, str(session_id))
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
+    clear_uploads(str(session_id))
     return {"success": True}
 
 
@@ -334,6 +340,38 @@ async def add_message_stream_endpoint(
                 # Store assistant message in Zep
                 if zep:
                     zep.add_message("assistant", assistant_text)
+                    async def _extract_to_zep():
+                        try:
+                            facts = await extract_memory_facts(
+                                messages=[
+                                    {"role": "user", "content": audio_user_content},
+                                    {"role": "assistant", "content": assistant_text},
+                                ],
+                                existing_context=zep_ctx,
+                                user_name=str(settings.zep_user_name or "User"),
+                            )
+                            if facts:
+                                zep.store_extracted_facts(facts)
+                        except Exception:
+                            logger.exception("Zep memory extraction failed")
+
+                    asyncio.create_task(_extract_to_zep())
+                    async def _extract_to_zep():
+                        try:
+                            facts = await extract_memory_facts(
+                                messages=[
+                                    {"role": "user", "content": user_content},
+                                    {"role": "assistant", "content": assistant_text},
+                                ],
+                                existing_context=zep_ctx,
+                                user_name=str(settings.zep_user_name or "User"),
+                            )
+                            if facts:
+                                zep.store_extracted_facts(facts)
+                        except Exception:
+                            logger.exception("Zep memory extraction failed")
+
+                    asyncio.create_task(_extract_to_zep())
 
                 task_id = None
                 async with AsyncSessionLocal() as db2:
@@ -646,4 +684,3 @@ async def message_events_endpoint(session_id: UUID):
                 yield {"event": "message_created", "data": json.dumps(event_data)}
 
     return EventSourceResponse(event_generator())
-

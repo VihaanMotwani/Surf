@@ -126,3 +126,28 @@ export async function apiPostAudioStream(
   }
   await parseSSE(res, onEvent)
 }
+
+export async function apiPostFile(
+  path: string,
+  fileBuffer: Buffer,
+  mimeType: string,
+  filename: string
+): Promise<Record<string, unknown>> {
+  const cleanMimeType = mimeType.split(';')[0] || mimeType
+  const ext = filename.includes('.') ? filename.split('.').pop() : undefined
+  const safeFilename = filename || `upload.${ext || 'bin'}`
+  const blob = new Blob([new Uint8Array(fileBuffer)], { type: cleanMimeType || 'application/octet-stream' })
+
+  const formData = new FormData()
+  formData.append('file', blob, safeFilename)
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: formData
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`API ${res.status}: ${text}`)
+  }
+  return res.json() as Promise<Record<string, unknown>>
+}

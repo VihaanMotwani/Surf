@@ -12,6 +12,7 @@ global.window.electron = {
   sendMessage: async () => ({ id: '1', message: 'test' }),
   getChatHistory: async () => [],
   clearChatHistory: async () => ({ success: true }),
+  uploadFile: async () => ({ success: true }),
   onStreamStart: () => () => {},
   onStreamChunk: () => () => {},
   onStreamEnd: () => () => {},

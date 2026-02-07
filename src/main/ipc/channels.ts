@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   // Chat channels
   CHAT_SEND_MESSAGE: 'chat:send-message',
   CHAT_SEND_AUDIO: 'chat:send-audio',
+  CHAT_UPLOAD_FILE: 'chat:upload-file',
   CHAT_STREAM_START: 'chat:stream-start',
   CHAT_STREAM_CHUNK: 'chat:stream-chunk',
   CHAT_STREAM_END: 'chat:stream-end',

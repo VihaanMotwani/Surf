@@ -6,6 +6,7 @@ from app.config import settings
 from app.crud import add_message, create_task, list_messages
 from app.llm import generate_assistant_text, parse_task_prompt
 from app.local_memory import extract_and_store_facts, get_memory_context as get_local_memory_context
+from app.memory_extractor import extract_memory_facts
 from app.memory import ZepMemory, create_memory
 from app.models import Session
 from app.schemas import ChatResponse, MessageResponse
@@ -74,6 +75,23 @@ async def handle_user_message(db: AsyncSession, session: Session, content: str) 
     # Store assistant message in Zep
     if zep:
         zep.add_message("assistant", assistant_text)
+        # Extract structured facts for Zep in the background
+        async def _extract_to_zep():
+            try:
+                facts = await extract_memory_facts(
+                    messages=[
+                        {"role": "user", "content": content},
+                        {"role": "assistant", "content": assistant_text},
+                    ],
+                    existing_context=zep_ctx,
+                    user_name=str(settings.zep_user_name or "User"),
+                )
+                if facts:
+                    zep.store_extracted_facts(facts)
+            except Exception:
+                logger.exception("Zep memory extraction failed")
+
+        asyncio.create_task(_extract_to_zep())
 
     task_id = None
     if task_prompt:

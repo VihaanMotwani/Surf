@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from app.db import AsyncSessionLocal
 from app.models import Artifact, Session, Task, TaskEvent
 from worker.runner import run_browser_use_task, summarize_history, to_jsonable
+from app.uploads import list_uploads
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,20 @@ async def execute_task_background(
             enriched_prompt = f"{previous_context}\n\n---\nNEW TASK: {prompt}"
             logger.info(f"Enriched task with previous browser context for session {session_id}")
 
+        # Add available file uploads for this session (if any)
+        uploads = list_uploads(session_id)
+        available_file_paths = None
+        if uploads:
+            uploads_lines = "\n".join(
+                f"- {u['filename']}: {u['path']}" for u in uploads
+            )
+            enriched_prompt += (
+                "\n\nFILES AVAILABLE FOR UPLOAD:\n"
+                f"{uploads_lines}\n"
+                "Use the upload_file action with the full file path above when a file upload is required."
+            )
+            available_file_paths = [u["path"] for u in uploads]
+
         # Define step callback - emit to DB and optionally call custom callback
         async def step_handler(step_data):
             await _emit_event(task_id, "step", step_data)
@@ -208,7 +223,8 @@ async def execute_task_background(
         history = await run_browser_use_task(
             enriched_prompt,
             browser=browser,  # Pass existing browser to reuse it
-            on_step_callback=lambda step_data: asyncio.create_task(step_handler(step_data))
+            on_step_callback=lambda step_data: asyncio.create_task(step_handler(step_data)),
+            available_file_paths=available_file_paths,
         )
 
         # Store browser context for next task in this session

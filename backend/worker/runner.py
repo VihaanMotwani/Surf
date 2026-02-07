@@ -35,7 +35,12 @@ def to_jsonable(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
-async def run_browser_use_task(task_prompt: str, browser: Browser | None = None, on_step_callback=None):
+async def run_browser_use_task(
+    task_prompt: str,
+    browser: Browser | None = None,
+    on_step_callback=None,
+    available_file_paths: list[str] | None = None,
+):
     # Enrich the task prompt with Zep memory context
     zep = _get_zep()
     enriched_prompt = task_prompt
@@ -50,12 +55,16 @@ async def run_browser_use_task(task_prompt: str, browser: Browser | None = None,
         await browser.start()
     try:
         llm = ChatBrowserUse()
-        agent = Agent(
+        agent_kwargs = dict(
             task=enriched_prompt,
             llm=llm,
             browser=browser,
-            use_thinking=True  # Enable chain of thought
+            use_thinking=True,  # Enable chain of thought
         )
+        if available_file_paths:
+            agent_kwargs["available_file_paths"] = available_file_paths
+
+        agent = Agent(**agent_kwargs)
 
         # Wrap the agent to stream steps if callback provided
         if on_step_callback:

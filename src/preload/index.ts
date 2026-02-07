@@ -6,6 +6,7 @@ export interface ElectronAPI {
   // Chat methods
   sendMessage: (sessionId: string, message: string, assistantId?: string, options?: { silent?: boolean }) => Promise<{ id: string }>
   sendAudio: (sessionId: string, audioBuffer: ArrayBuffer, mimeType: string) => Promise<{ id: string }>
+  uploadFile: (sessionId: string, fileBuffer: ArrayBuffer, mimeType: string, filename: string) => Promise<{ success: boolean; error?: string; filename?: string; path?: string }>
   getChatHistory: () => Promise<unknown[]>
   clearChatHistory: () => Promise<{ success: boolean }>
   onStreamStart: (callback: (messageId: string) => void) => () => void
@@ -59,6 +60,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.CHAT_SEND_MESSAGE, sessionId, message, assistantId, options),
   sendAudio: (sessionId: string, audioBuffer: ArrayBuffer, mimeType: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHAT_SEND_AUDIO, sessionId, audioBuffer, mimeType),
+  uploadFile: (sessionId: string, fileBuffer: ArrayBuffer, mimeType: string, filename: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHAT_UPLOAD_FILE, sessionId, fileBuffer, mimeType, filename),
   getChatHistory: () => ipcRenderer.invoke(IPC_CHANNELS.CHAT_GET_HISTORY),
   clearChatHistory: () => ipcRenderer.invoke(IPC_CHANNELS.CHAT_CLEAR_HISTORY),
   onStreamStart: (callback) => {

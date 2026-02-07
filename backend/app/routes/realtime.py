@@ -91,6 +91,8 @@ class RealtimeSession:
             "When the user asks you to do something on the web (search, navigate, fill forms, etc.), "
             "use the execute_browser_task function.\n\n"
             "If you receive the browser agent's actions or thoughts, you can update the user about the progress."
+            "If the user want you to submit an job application, process with the browser agent with only information you have from the user. If there is missing information, ask the user for it. Don't need to blindly create dummy information to submit.\n\n"
+            "If the user ask you to remember something even their private context just take that and use the extraction tool to store it.\n\n"
             "Be patient with the browser agent, it may take some time to complete the task."
             "If the user asks about anything that is on the browser, do not make assumptions or hallcuinate. Please only use information from the browser agent's thoughts and actions."
             "Be conversational, helpful, and proactive. Keep responses concise since this is a voice interface."

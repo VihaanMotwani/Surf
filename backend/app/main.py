@@ -14,6 +14,7 @@ from app.routes.tasks import router as tasks_router
 from app.routes.knowledge_graph import router as kg_router
 from app.routes.speech import router as speech_router
 from app.routes.realtime import router as realtime_router
+from app.routes.uploads import router as uploads_router
 
 load_dotenv()
 
@@ -41,6 +42,7 @@ app.include_router(tasks_router)
 app.include_router(kg_router)
 app.include_router(speech_router)
 app.include_router(realtime_router)
+app.include_router(uploads_router)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"

@@ -134,7 +134,29 @@ async def worker_loop():
                 enriched_prompt = f"{previous_context}\n\n---\nNEW TASK: {prompt}"
                 logger.info(f"Worker: Enriched task with previous browser context for session {session_id}")
 
-            history = await run_browser_use_task(enriched_prompt, browser=browser)  # Pass browser to reuse it
+            # Add available file uploads for this session (if any)
+            available_file_paths = None
+            try:
+                from app.uploads import list_uploads
+                uploads = list_uploads(session_id)
+                if uploads:
+                    uploads_lines = "\n".join(
+                        f"- {u['filename']}: {u['path']}" for u in uploads
+                    )
+                    enriched_prompt += (
+                        "\n\nFILES AVAILABLE FOR UPLOAD:\n"
+                        f"{uploads_lines}\n"
+                        "Use the upload_file action with the full file path above when a file upload is required."
+                    )
+                    available_file_paths = [u["path"] for u in uploads]
+            except Exception as exc:
+                logger.warning("Worker: Failed to load uploads for session %s: %s", session_id, exc)
+
+            history = await run_browser_use_task(
+                enriched_prompt,
+                browser=browser,  # Pass browser to reuse it
+                available_file_paths=available_file_paths,
+            )
 
             # Store browser context for next task in this session
             if history:

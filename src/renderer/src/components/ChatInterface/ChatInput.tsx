@@ -1,5 +1,5 @@
-import { useState, useRef, KeyboardEvent, useEffect } from 'react'
-import { Send, Mic, Square, Loader2 } from 'lucide-react'
+import { useState, useRef, KeyboardEvent, useEffect, type ChangeEvent } from 'react'
+import { Send, Mic, Square, Loader2, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useChatStore } from '@/store/chat'
@@ -11,6 +11,7 @@ import { useScreenReaderAnnounce } from '@/hooks/useAccessibility'
 export function ChatInput() {
   const [input, setInput] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const electron = useIPC()
   const { sessionId, isLoading, addMessage, setLoading } = useChatStore()
   const { toast } = useToast()
@@ -121,6 +122,41 @@ export function ChatInput() {
     }
   }
 
+  const handleFilePick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !sessionId) return
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const result = await electron.uploadFile(
+        sessionId,
+        buffer,
+        file.type || 'application/octet-stream',
+        file.name
+      )
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed')
+      }
+      toast({
+        title: 'File uploaded',
+        description: `${file.name} is ready. You can ask Surf to upload it in a browser task.`
+      })
+    } catch (error) {
+      console.error('File upload failed:', error)
+      toast({
+        variant: 'destructive',
+        title: 'Upload Error',
+        description: 'Failed to upload file. Please try again.'
+      })
+    } finally {
+      e.target.value = ''
+    }
+  }
+
   const handleVoiceInput = async () => {
     try {
       if (realtime.isListening) {
@@ -166,6 +202,13 @@ export function ChatInput() {
           }}
           className="flex items-center gap-2"
         >
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            aria-hidden="true"
+          />
           <div className="relative flex-1">
             <Input
               ref={inputRef}
@@ -187,6 +230,18 @@ export function ChatInput() {
               aria-label="Chat message input"
             />
           </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleFilePick}
+            disabled={!sessionId || isLoading}
+            className="h-11 w-11 rounded-xl text-muted-foreground hover:text-foreground"
+            aria-label="Attach file for browser upload"
+          >
+            <Paperclip className="h-5 w-5" />
+          </Button>
 
           <Button
             type="button"
@@ -225,4 +280,3 @@ export function ChatInput() {
     </div>
   )
 }
-
