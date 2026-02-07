@@ -62,6 +62,7 @@ async def capture_screenshot_b64(session_id: str | None = None) -> str | None:
 
 
 async def _finalize_success(task_id: str, session_id: str, history):
+    payload = None
     async with AsyncSessionLocal() as db:
         async with db.begin():
             task = await db.get(Task, task_id)
@@ -91,6 +92,31 @@ async def _finalize_success(task_id: str, session_id: str, history):
             session = await db.get(Session, session_id)
             if session:
                 session.status = "task_completed"
+
+    # Generate summary after DB commit completes
+    # Note: payload variable still in scope from above
+    await _generate_completion_summary(task_id, session_id, payload)
+
+
+async def _generate_completion_summary(task_id: str, session_id: str, result_summary: dict):
+    """
+    Generate and store an assistant message summarizing task completion.
+
+    This runs after a task succeeds to provide automatic feedback to the user.
+    Uses the LLM to create natural, context-aware summaries with follow-up suggestions.
+    """
+    from app.conversation import create_assistant_message_for_task_completion
+
+    try:
+        await create_assistant_message_for_task_completion(
+            session_id=session_id,
+            task_result=result_summary,
+            task_id=task_id
+        )
+        logger.info(f"Generated completion summary for task {task_id}")
+    except Exception as e:
+        logger.error(f"Failed to generate completion summary for task {task_id}: {e}", exc_info=True)
+        # Don't fail the task if summary generation fails - it's a nice-to-have
 
 
 async def _finalize_failure(task_id: str, session_id: str, error_message: str):

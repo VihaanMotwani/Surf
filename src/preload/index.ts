@@ -14,6 +14,12 @@ export interface ElectronAPI {
   onStreamError: (callback: (error: string) => void) => () => void
   onTranscription: (callback: (data: { text: string }) => void) => () => void
 
+  // Message event methods (for auto-summaries)
+  subscribeMessageEvents: (sessionId: string) => Promise<{ success: boolean }>
+  unsubscribeMessageEvents: (sessionId: string) => Promise<{ success: boolean }>
+  onMessageCreated: (callback: (data: { sessionId: string; message: unknown }) => void) => () => void
+  onMessageAudioReady: (callback: (data: { sessionId: string; messageId: string; audioB64: string; format: string }) => void) => () => void
+
   // Task methods
   getTaskStatus: (taskId: string) => Promise<{ id: string; status: string; error?: string }>
   getTaskEvents: (taskId: string) => Promise<Array<{ id: number; type: string; payload: Record<string, unknown> }>>
@@ -79,6 +85,22 @@ const electronAPI: ElectronAPI = {
     const listener = (_e: Electron.IpcRendererEvent, data: { text: string }) => callback(data)
     ipcRenderer.on(IPC_CHANNELS.CHAT_TRANSCRIPTION, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_TRANSCRIPTION, listener)
+  },
+
+  // Message events (auto-summaries)
+  subscribeMessageEvents: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESSAGE_EVENTS_SUBSCRIBE, sessionId),
+  unsubscribeMessageEvents: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESSAGE_EVENTS_UNSUBSCRIBE, sessionId),
+  onMessageCreated: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, data: { sessionId: string; message: unknown }) => callback(data)
+    ipcRenderer.on(IPC_CHANNELS.MESSAGE_EVENT_CREATED, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MESSAGE_EVENT_CREATED, listener)
+  },
+  onMessageAudioReady: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, data: { sessionId: string; messageId: string; audioB64: string; format: string }) => callback(data)
+    ipcRenderer.on(IPC_CHANNELS.MESSAGE_EVENT_AUDIO_READY, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MESSAGE_EVENT_AUDIO_READY, listener)
   },
 
   // Tasks

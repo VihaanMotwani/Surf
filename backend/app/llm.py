@@ -62,6 +62,33 @@ async def generate_assistant_text(messages: list[Message], memory_context: str =
     return "I'm not sure how to respond to that."
 
 
+async def generate_text_from_prompt(prompt: str, temperature: float = 0.7) -> str:
+    """
+    Generate text from a direct prompt without conversation history.
+
+    Used for auto-generated summaries and other standalone text generation.
+
+    Args:
+        prompt: The prompt text
+        temperature: Sampling temperature (0.7 = slightly creative, good for summaries)
+
+    Returns:
+        Generated text response
+    """
+    def _call():
+        return client.responses.create(
+            model=settings.openai_model,
+            input=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+        )
+
+    response = await asyncio.to_thread(_call)
+    output_text = getattr(response, "output_text", None)
+    if output_text:
+        return output_text
+    return "I completed the task successfully."
+
+
 def stream_assistant_text(messages: list[Message], memory_context: str = "") -> Iterable[str]:
     stream = client.responses.create(
         model=settings.openai_model,

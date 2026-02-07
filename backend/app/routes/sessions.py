@@ -6,12 +6,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
 from app.conversation import handle_user_message, check_task_running
 from app.crud import add_message, create_session, delete_session, get_latest_task_result, get_session, list_messages, list_sessions
 from app.db import AsyncSessionLocal, get_db
 from app.llm import TASK_PROMPT_MARKERS, client as openai_client, is_describe_request, parse_task_prompt, stream_assistant_text, stream_describe_screenshot
 from app.local_memory import extract_and_store_facts, get_memory_context as get_local_memory_context
+from app.message_events import message_event_stream
 from app.models import Session as SessionModel
 from app.schemas import (
     AudioChatResponse,
@@ -617,3 +619,28 @@ async def add_audio_message_stream_endpoint(
                 break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+
+@router.get("/{session_id}/messages/events")
+async def message_events_endpoint(session_id: UUID):
+    """
+    SSE endpoint for real-time message notifications.
+
+    Clients subscribe to this endpoint to receive notifications when new messages
+    are added to the session outside of the normal request/response cycle
+    (e.g., auto-generated summaries after task completion).
+
+    Events:
+    - message_created: A new message was added to the session
+    - keepalive: Periodic keepalive to prevent connection timeout
+    """
+    async def event_generator():
+        async for event_data in message_event_stream(str(session_id)):
+            if event_data.get("type") == "keepalive":
+                yield {"event": "keepalive", "data": ""}
+            else:
+                yield {"event": "message_created", "data": json.dumps(event_data)}
+
+    return EventSourceResponse(event_generator())
+

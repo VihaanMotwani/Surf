@@ -12,6 +12,12 @@ export const IPC_CHANNELS = {
   CHAT_GET_HISTORY: 'chat:get-history',
   CHAT_CLEAR_HISTORY: 'chat:clear-history',
 
+  // Message event channels (for auto-summaries)
+  MESSAGE_EVENTS_SUBSCRIBE: 'message-events:subscribe',
+  MESSAGE_EVENTS_UNSUBSCRIBE: 'message-events:unsubscribe',
+  MESSAGE_EVENT_CREATED: 'message-event:created',
+  MESSAGE_EVENT_AUDIO_READY: 'message-event:audio-ready',
+
   // Knowledge Graph channels
   GRAPH_GET_DATA: 'graph:get-data',
   GRAPH_UPDATE_NODE: 'graph:update-node',

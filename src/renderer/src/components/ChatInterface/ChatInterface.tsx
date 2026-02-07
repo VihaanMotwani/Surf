@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/use-toast'
 
 export function ChatInterface() {
   const electron = useIPC()
-  const { sessionId, addMessage, appendToMessage, setStreamingStatus, setTaskInfo, addTaskStep, setSessionId, setLoading, loadSession } =
+  const { sessionId, addMessage, appendToMessage, setStreamingStatus, setTaskInfo, addTaskStep, setAudioPlayed, setSessionId, setLoading, loadSession } =
     useChatStore()
   const { speak } = useSpeech()
   const settings = useSettingsStore()
@@ -204,6 +204,79 @@ export function ChatInterface() {
       unsubTaskStream()
     }
   }, [electron, addMessage, appendToMessage, setStreamingStatus, setLoading, speak, settings.autoSpeak, toast, startTaskPolling, addTaskStep])
+
+  // Subscribe to message events for auto-summaries
+  useEffect(() => {
+    if (!sessionId) return
+
+    // Subscribe to message events when session is active
+    electron.subscribeMessageEvents(sessionId).catch(console.error)
+
+    const unsubMessageCreated = electron.onMessageCreated((data) => {
+      // Only handle events for current session
+      if (data.sessionId !== sessionId) return
+
+      const message = data.message as {
+        message_id: string
+        role: string
+        content: string
+        created_at: string
+        is_auto_summary?: boolean
+        task_id?: string
+      }
+
+      // Add the auto-summary message to the chat
+      addMessage({
+        id: message.message_id,
+        role: message.role as 'assistant' | 'user',
+        content: message.content,
+        timestamp: new Date(message.created_at).getTime(),
+        isAutoSummary: message.is_auto_summary,
+        taskId: message.task_id
+      })
+
+      // Note: Audio will be played via onMessageAudioReady event
+      // The backend sends pre-generated TTS audio via SSE
+    })
+
+    const unsubAudioReady = electron.onMessageAudioReady((data) => {
+      // Only handle events for current session
+      if (data.sessionId !== sessionId) return
+
+      // Play the audio automatically
+      if (settings.autoSpeak) {
+        try {
+          // Convert base64 to audio blob
+          const audioData = atob(data.audioB64)
+          const audioArray = new Uint8Array(audioData.length)
+          for (let i = 0; i < audioData.length; i++) {
+            audioArray[i] = audioData.charCodeAt(i)
+          }
+          const audioBlob = new Blob([audioArray], { type: `audio/${data.format}` })
+          const audioUrl = URL.createObjectURL(audioBlob)
+
+          // Play the audio
+          const audio = new Audio(audioUrl)
+          audio.play().catch(console.error)
+
+          // Mark as played in the store
+          setAudioPlayed(data.messageId)
+
+          // Clean up URL after playing
+          audio.onended = () => URL.revokeObjectURL(audioUrl)
+        } catch (error) {
+          console.error('Failed to play auto-summary audio:', error)
+        }
+      }
+    })
+
+    return () => {
+      unsubMessageCreated()
+      unsubAudioReady()
+      // Unsubscribe from message events when session changes or component unmounts
+      electron.unsubscribeMessageEvents(sessionId).catch(console.error)
+    }
+  }, [sessionId, electron, addMessage, setAudioPlayed, settings.autoSpeak])
 
   return (
     <div className="flex h-full flex-col">

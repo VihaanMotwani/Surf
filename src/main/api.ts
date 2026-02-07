@@ -76,9 +76,10 @@ async function parseSSE(res: Response, onEvent: (event: SSEEvent) => void): Prom
 
 export async function apiGetStream(
   path: string,
-  onEvent: (event: SSEEvent) => void
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`)
+  const res = await fetch(`${API_BASE}${path}`, { signal })
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`API ${res.status}: ${text}`)

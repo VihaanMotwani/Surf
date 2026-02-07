@@ -10,6 +10,8 @@ export interface ChatMessage {
   taskStatus?: 'running' | 'succeeded' | 'failed'
   taskResult?: Record<string, unknown>
   taskSteps?: Array<Record<string, unknown>>
+  isAutoSummary?: boolean // True if this is an auto-generated task completion summary
+  audioPlayed?: boolean // Track if TTS audio has been played for this message
 }
 
 export interface GraphNode {

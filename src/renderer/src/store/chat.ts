@@ -16,6 +16,7 @@ interface ChatState {
     result?: Record<string, unknown>
   ) => void
   addTaskStep: (messageId: string, step: Record<string, unknown>) => void
+  setAudioPlayed: (messageId: string) => void
   clearMessages: () => void
   setLoading: (isLoading: boolean) => void
   setSessionId: (id: string | null) => void
@@ -70,6 +71,13 @@ export const useChatStore = create<ChatState>((set) => ({
         const steps = (msg.taskSteps || []) as Record<string, unknown>[]
         return { ...msg, taskSteps: [...steps, step] }
       })
+    })),
+
+  setAudioPlayed: (messageId) =>
+    set((state) => ({
+      messages: state.messages.map((msg) =>
+        msg.id === messageId ? { ...msg, audioPlayed: true } : msg
+      )
     })),
 
   clearMessages: () => set({ messages: [], sessionId: null }),
