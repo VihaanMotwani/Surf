@@ -31,6 +31,12 @@ export function ChatInterface() {
   useEffect(() => {
     if (hasInitialized.current) return
     const ensureSession = async () => {
+      // If we already have a session loaded (e.g. from SessionHistory), don't overwrite it
+      if (sessionId) {
+        hasInitialized.current = true
+        return
+      }
+
       if (sessionCreatingRef.current) return
       sessionCreatingRef.current = true
       hasInitialized.current = true

@@ -17,6 +17,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import websockets
 
 from app.config import settings
+from app.crud import add_message, list_messages
+from app.db import AsyncSessionLocal
 from app.memory import ZepMemory, create_memory
 from app.memory_extractor import ConversationBuffer, MemoryFact
 
@@ -45,6 +47,8 @@ class RealtimeSession:
         self._pending_input_orders: dict[str, int] = {}     # item_id -> order
         # Conversation buffer for smart memory extraction
         self._conversation_buffer: Optional[ConversationBuffer] = None
+        # Event to signal when session is configured
+        self.session_ready = asyncio.Event()
 
     def _next_turn(self) -> int:
         """Get the next turn number."""
@@ -123,6 +127,45 @@ class RealtimeSession:
             },
         ]
 
+    async def _inject_history(self):
+        """Load conversation history from DB and inject into Realtime session."""
+        if not self.openai_ws:
+            return
+            
+        try:
+            async with AsyncSessionLocal() as db:
+                messages = await list_messages(db, self.session_id)
+                
+            if not messages:
+                logger.debug(f"No history to inject for session {self.session_id}")
+                return
+                
+            logger.info(f"Injecting {len(messages)} messages from DB history into Realtime session")
+            
+            for msg in messages:
+                role = msg.role
+                content = msg.content
+                
+                # Only inject user and assistant messages
+                if role not in ("user", "assistant"):
+                    continue
+                
+                # Content type depends on role: user=input_text, assistant=text
+                content_type = "input_text" if role == "user" else "text"
+                    
+                # Create conversation item for each historical message
+                await self.openai_ws.send(json.dumps({
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": role,
+                        "content": [{"type": content_type, "text": content}]
+                    }
+                }))
+                
+        except Exception as e:
+            logger.warning(f"Failed to inject history from DB: {e}")
+
     async def _send_session_config(self):
         """Send session configuration to OpenAI."""
         session_config = {
@@ -193,6 +236,12 @@ class RealtimeSession:
                     "text": transcript,
                     "order": order  # Include order for frontend sorting
                 })
+                # Persist to DB for session reload
+                try:
+                    async with AsyncSessionLocal() as db:
+                        await add_message(db, self.session_id, "user", transcript)
+                except Exception as e:
+                    logger.warning(f"Failed to persist user transcript to DB: {e}")
                 # Buffer for smart extraction (instead of storing every message)
                 if self._conversation_buffer:
                     self._conversation_buffer.add_message("user", transcript)
@@ -215,6 +264,13 @@ class RealtimeSession:
                 "text": transcript,
                 "order": order  # Include order for frontend sorting
             })
+            # Persist to DB for session reload
+            if transcript:
+                try:
+                    async with AsyncSessionLocal() as db:
+                        await add_message(db, self.session_id, "assistant", transcript)
+                except Exception as e:
+                    logger.warning(f"Failed to persist assistant transcript to DB: {e}")
             # Buffer for smart extraction (instead of storing every message)
             if self._conversation_buffer and transcript:
                 self._conversation_buffer.add_message("assistant", transcript)
@@ -251,6 +307,9 @@ class RealtimeSession:
             await self.client_ws.send_json({"type": "session_created"})
 
         elif msg_type == "session.updated":
+            # Session is now fully configured - safe to inject history and accept messages
+            await self._inject_history()
+            self.session_ready.set()
             await self.client_ws.send_json({"type": "ready"})
 
         elif msg_type == "response.done":
@@ -282,6 +341,16 @@ class RealtimeSession:
 
     async def _client_to_openai_loop(self):
         """Forward messages from client to OpenAI."""
+    async def _client_to_openai_loop(self):
+        """Forward messages from client to OpenAI."""
+        # Wait for session configuration to complete before sending user input
+        logger.info(f"Session {self.session_id}: Waiting for session_ready...")
+        try:
+            await asyncio.wait_for(self.session_ready.wait(), timeout=10.0)
+            logger.info(f"Session {self.session_id}: Session is ready, starting client loop")
+        except asyncio.TimeoutError:
+            logger.warning(f"Session {self.session_id}: Timed out waiting for session_ready, starting loop anyway")
+        
         try:
             while self.is_running:
                 try:
@@ -326,6 +395,44 @@ class RealtimeSession:
                                 "type": "input_audio_buffer.commit"
                             }))
 
+                    elif msg_type == "text":
+                        # Handle text messages (unified pipeline with audio)
+                        content = data.get("content", "")
+                        if content and self.openai_ws:
+                            # Assign turn order for the user message
+                            order = self._next_turn()
+                            
+                            # Send text as conversation item to OpenAI
+                            await self.openai_ws.send(json.dumps({
+                                "type": "conversation.item.create",
+                                "item": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": content}]
+                                }
+                            }))
+                            
+                            # Send order confirmation back to frontend for sorting
+                            await self.client_ws.send_json({
+                                "type": "text_confirmed",
+                                "text": content,
+                                "order": order
+                            })
+                            
+                            # Persist to DB for session reload
+                            try:
+                                async with AsyncSessionLocal() as db:
+                                    await add_message(db, self.session_id, "user", content)
+                            except Exception as e:
+                                logger.warning(f"Failed to persist text message to DB: {e}")
+                            
+                            # Buffer for memory extraction
+                            if self._conversation_buffer:
+                                self._conversation_buffer.add_message("user", content)
+                            
+                            # Trigger response generation
+                            await self.openai_ws.send(json.dumps({"type": "response.create"}))
+
                 except (WebSocketDisconnect, RuntimeError):
                     break
                 except Exception as e:
@@ -358,6 +465,9 @@ class RealtimeSession:
                 self.is_running = True
 
                 logger.info(f"Realtime session {self.session_id} connected to OpenAI")
+                
+                # Note: History injection now happens in _openai_to_client_loop
+                # after receiving session.updated (ensuring session is configured first)
 
                 # Run both loops concurrently
                 await asyncio.gather(

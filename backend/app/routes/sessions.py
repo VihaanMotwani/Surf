@@ -344,22 +344,6 @@ async def add_message_stream_endpoint(
                         try:
                             facts = await extract_memory_facts(
                                 messages=[
-                                    {"role": "user", "content": audio_user_content},
-                                    {"role": "assistant", "content": assistant_text},
-                                ],
-                                existing_context=zep_ctx,
-                                user_name=str(settings.zep_user_name or "User"),
-                            )
-                            if facts:
-                                zep.store_extracted_facts(facts)
-                        except Exception:
-                            logger.exception("Zep memory extraction failed")
-
-                    asyncio.create_task(_extract_to_zep())
-                    async def _extract_to_zep():
-                        try:
-                            facts = await extract_memory_facts(
-                                messages=[
                                     {"role": "user", "content": user_content},
                                     {"role": "assistant", "content": assistant_text},
                                 ],
@@ -621,9 +605,25 @@ async def add_audio_message_stream_endpoint(
 
                 assistant_text, task_prompt = parse_task_prompt(full_text)
 
-                # Store assistant message in Zep
+                # Store assistant message in Zep and extract memory facts
                 if zep:
                     zep.add_message("assistant", assistant_text)
+                    async def _extract_to_zep():
+                        try:
+                            facts = await extract_memory_facts(
+                                messages=[
+                                    {"role": "user", "content": audio_user_content},
+                                    {"role": "assistant", "content": assistant_text},
+                                ],
+                                existing_context=zep_ctx,
+                                user_name=str(settings.zep_user_name or "User"),
+                            )
+                            if facts:
+                                zep.store_extracted_facts(facts)
+                        except Exception:
+                            logger.exception("Zep memory extraction failed")
+
+                    asyncio.create_task(_extract_to_zep())
 
                 task_id = None
                 async with AsyncSessionLocal() as db2:

@@ -39,6 +39,16 @@ export function ChatInput() {
         seq: order
       })
     },
+    onTextConfirmed: (text, order) => {
+      // Add text message with proper order when backend confirms
+      addMessage({
+        id: `user-text-${Date.now()}`,
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        seq: order
+      })
+    },
     onTaskRequested: async (task) => {
       // Handle browser task through existing pipeline
       console.log('[ChatInput] Task requested:', task.taskPrompt)
@@ -67,52 +77,48 @@ export function ChatInput() {
   })
 
   // Auto-connect to realtime when session is available
+  // Always call connect when sessionId changes - connect() handles session switching internally
   useEffect(() => {
-    if (sessionId && !realtime.isConnected) {
+    if (sessionId) {
       realtime.connect(sessionId)
     }
     // Don't disconnect on cleanup - let the WebSocket handle its own lifecycle
     // Disconnecting here causes race conditions with component re-renders
-  }, [sessionId, realtime.isConnected, realtime.connect])
+  }, [sessionId, realtime.connect])
 
   const handleSend = async () => {
     const trimmedInput = input.trim()
     if (!trimmedInput || isLoading || !sessionId) return
 
-    const assistantId = `assistant-${Date.now()}`
-
-    // Add user message then assistant placeholder — synchronous, guaranteed order
-    addMessage({
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: trimmedInput,
-      timestamp: Date.now()
-    })
-    addMessage({
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      isStreaming: true
-    })
-
+    // Message will be added via onTextConfirmed callback with proper order
     setInput('')
-    setLoading(true)
     announce('Message sent. Waiting for response.', 'polite')
 
+    // Always call connect to ensure we're connected to the CURRENT session
+    // (connect handles session mismatch internally - if connected to wrong session, it reconnects)
     try {
-      await electron.sendMessage(sessionId, trimmedInput, assistantId)
+      await realtime.connect(sessionId)
     } catch (error) {
-      console.error('Failed to send message:', error)
+      console.error('Failed to connect:', error)
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to connect to server. Please try again.'
+      })
+      return
+    }
+
+    // Send text through Realtime API (unified pipeline)
+    const sent = await realtime.sendTextMessage(trimmedInput)
+    if (!sent) {
       toast({
         variant: 'destructive',
         title: 'Error',
         description: 'Failed to send message. Please try again.'
       })
-    } finally {
-      setLoading(false)
-      inputRef.current?.focus()
     }
+
+    inputRef.current?.focus()
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

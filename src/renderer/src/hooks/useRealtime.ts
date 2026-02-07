@@ -19,6 +19,7 @@ interface UseRealtimeOptions {
     onTaskRequested?: (task: TaskRequest) => void
     onUserTranscript?: (text: string, order: number) => void
     onAssistantTranscript?: (text: string, order: number) => void
+    onTextConfirmed?: (text: string, order: number) => void
     onError?: (message: string) => void
 }
 
@@ -45,6 +46,34 @@ class AudioProcessor extends AudioWorkletProcessor {
 registerProcessor('audio-processor', AudioProcessor)
 `
 
+// Module-level singleton for WebSocket connection - prevents duplicates across React re-renders
+let globalWs: WebSocket | null = null
+let globalSessionId: string | null = null
+let globalConnectPromise: Promise<void> | null = null
+let globalConnectionRefCount = 0
+
+// Reset globals on window load or HMR to ensure clean state on app startup
+// This fixes issues where loading an existing session fails due to stale globals
+const resetGlobals = () => {
+    if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+        globalWs.close()
+    }
+    globalWs = null
+    globalSessionId = null
+    globalConnectPromise = null
+    globalConnectionRefCount = 0
+}
+
+// Run reset on initial module load
+resetGlobals()
+
+// Also reset on HMR (Vite's hot module replacement)
+if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+        resetGlobals()
+    })
+}
+
 export function useRealtime(options: UseRealtimeOptions = {}) {
     const [state, setState] = useState<RealtimeState>({
         isConnected: false,
@@ -54,6 +83,12 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
         assistantTranscript: ''
     })
 
+    // Store options in a ref to prevent re-creating functions when options change
+    const optionsRef = useRef(options)
+    useEffect(() => {
+        optionsRef.current = options
+    }, [options])
+
     // Refs to keep track of state without triggering re-renders in callbacks
     const wsRef = useRef<WebSocket | null>(null)
     const audioContextRef = useRef<AudioContext | null>(null)
@@ -62,31 +97,50 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
     const streamRef = useRef<MediaStream | null>(null)
     const sessionIdRef = useRef<string | null>(null)
 
-    // Initialize audio context
+    // Global initialization promise to prevent race conditions
+    const audioInitPromiseRef = useRef<Promise<AudioContext> | null>(null)
+
+    // Initialize audio context (idempotent)
     const initAudioContext = useCallback(async () => {
-        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-            audioContextRef.current = new AudioContext()
+        // If we already have a running context, just return it
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+            if (audioContextRef.current.state === 'suspended') {
+                await audioContextRef.current.resume()
+            }
+            return audioContextRef.current
         }
 
-        // Resume if suspended
-        if (audioContextRef.current.state === 'suspended') {
-            await audioContextRef.current.resume()
-        }
+        // Use global promise logic (stored in ref for this hook instance, but we need module-level too really)
+        // Actually, for AudioWorklet, we need to be careful.
+        // Let's use a simpler approach: Try to create context, try to add module.
+        // If addModule fails because "already registered", that's FINE.
 
-        // Add worklet module if not already added
         try {
-            // Check if we already registered the worklet to avoid errors
-            // Actually we can't easily check, but adding module again might be fine or throw
-            // We'll use a unique name construction if needed, but simplest is standard Blob approach
-            const blob = new Blob([workletCode], { type: 'application/javascript' })
-            const workletUrl = URL.createObjectURL(blob)
-            await audioContextRef.current.audioWorklet.addModule(workletUrl)
-            URL.revokeObjectURL(workletUrl)
-        } catch (e) {
-            console.warn('Worklet module loading error (might already be loaded):', e)
-        }
+            const ctx = new AudioContext()
+            audioContextRef.current = ctx
 
-        return audioContextRef.current
+            // Resume if suspended
+            if (ctx.state === 'suspended') {
+                await ctx.resume()
+            }
+
+            // Add worklet module
+            try {
+                const blob = new Blob([workletCode], { type: 'application/javascript' })
+                const workletUrl = URL.createObjectURL(blob)
+                await ctx.audioWorklet.addModule(workletUrl)
+                URL.revokeObjectURL(workletUrl)
+            } catch (e: any) {
+                // Ignore "already registered" error, or any error really if it works
+                if (!e.message?.includes('already registered')) {
+                    console.warn('Worklet module loading warning (continuing):', e)
+                }
+            }
+            return ctx
+        } catch (e) {
+            console.error('Failed to init audio context:', e)
+            throw e
+        }
     }, [])
 
     // Optimized Float32 to PCM16 base64
@@ -238,7 +292,7 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
                     break
                 case 'user_transcript':
                     setState(s => ({ ...s, userTranscript: data.text }))
-                    options.onUserTranscript?.(data.text, data.order ?? Date.now())
+                    optionsRef.current.onUserTranscript?.(data.text, data.order ?? Date.now())
                     break
                 case 'assistant_transcript_delta':
                     setState(s => ({
@@ -248,13 +302,17 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
                     break
                 case 'assistant_transcript_done':
                     setState(s => ({ ...s, assistantTranscript: data.text }))
-                    options.onAssistantTranscript?.(data.text, data.order ?? Date.now())
+                    optionsRef.current.onAssistantTranscript?.(data.text, data.order ?? Date.now())
                     break
                 case 'task_requested':
-                    options.onTaskRequested?.({
+                    optionsRef.current.onTaskRequested?.({
                         taskPrompt: data.task_prompt,
                         callId: data.call_id
                     })
+                    break
+                case 'text_confirmed':
+                    // Backend confirms text message with order for proper sorting
+                    optionsRef.current.onTextConfirmed?.(data.text, data.order)
                     break
                 case 'ready':
                     console.log('[Realtime] Session ready')
@@ -264,83 +322,170 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
                     break
                 case 'error':
                     console.error('[Realtime] Error:', data.message)
-                    options.onError?.(data.message)
+                    optionsRef.current.onError?.(data.message)
                     break
             }
         } catch (e) {
             console.error('[Realtime] Failed to parse message:', e)
         }
-    }, [playAudio, options])
+    }, [playAudio])
 
-    // Connect to realtime session
-    const connectPromiseRef = useRef<Promise<void> | null>(null)
+    // Track if this hook instance has contributed to the global ref count
+    const hasConnectedRef = useRef(false)
 
+    // Connect to realtime session - uses module-level singleton
     const connect = useCallback(async (sessionId: string) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
+        // Increment reference count ONLY if we haven't already for this instance
+        if (!hasConnectedRef.current) {
+            globalConnectionRefCount++
+            hasConnectedRef.current = true
+            console.log('[Realtime] Connect called, refCount:', globalConnectionRefCount, 'SessionId:', sessionId)
+        } else {
+            console.log('[Realtime] Connect called (already tracking), refCount:', globalConnectionRefCount, 'SessionId:', sessionId)
+        }
+
+        // If already connected or connecting to the same session, don't reconnect
+        const wsState = globalWs?.readyState
+        const isConnectedOrConnecting = wsState === WebSocket.OPEN || wsState === WebSocket.CONNECTING
+
+        if (isConnectedOrConnecting && globalSessionId === sessionId) {
+            console.log('[Realtime] Already connected/connecting to session:', sessionId)
+            // Sync local ref with global
+            wsRef.current = globalWs
+            sessionIdRef.current = globalSessionId
+
+            // CRITICAL: Ensure local state reflects connection, otherwise consumers might retry
+            setState(s => ({ ...s, isConnected: true }))
+
+            if (globalConnectPromise) {
+                return globalConnectPromise
+            }
             return
         }
 
-        if (connectPromiseRef.current) {
-            return connectPromiseRef.current
+        // If connected to a different session, disconnect first (force close old one)
+        if (wsState === WebSocket.OPEN && globalSessionId !== sessionId) {
+            console.log('[Realtime] Session changed, disconnecting from old session:', globalSessionId)
+            if (globalWs) {
+                globalWs.close()
+                globalWs = null
+            }
+            globalSessionId = null
+            globalConnectPromise = null // Clear old promise so new session can connect
+            wsRef.current = null
+            sessionIdRef.current = null
+            globalConnectionRefCount = 1 // Reset ref count for new session
+            setState(s => ({ ...s, isConnected: false }))
+        }
+
+        // Wait for existing connection attempt
+        if (globalConnectPromise) {
+            return globalConnectPromise
         }
 
         console.log('[Realtime] Connecting to session:', sessionId)
+        globalSessionId = sessionId
         sessionIdRef.current = sessionId
 
-        // Initialize audio context early
-        try {
-            await initAudioContext()
-        } catch (e) {
-            console.error('[Realtime] Failed to init audio context:', e)
-        }
+        // Start connection process immediately and assign to global promise
+        // This prevents race conditions where multiple calls enter before the first one sets the promise
+        globalConnectPromise = (async () => {
+            try {
+                // Initialize audio context early
+                try {
+                    await initAudioContext()
+                } catch (e) {
+                    console.error('[Realtime] Failed to init audio context:', e)
+                }
 
-        connectPromiseRef.current = new Promise((resolve, reject) => {
-            const ws = new WebSocket(`${BACKEND_WS_URL}/realtime/session/${sessionId}`)
-            wsRef.current = ws
+                // Create WebSocket using a new promise that resolves when open
+                await new Promise<void>((resolve, reject) => {
+                    const ws = new WebSocket(`${BACKEND_WS_URL}/realtime/session/${sessionId}`)
+                    globalWs = ws
+                    wsRef.current = ws
 
-            ws.onopen = () => {
-                console.log('[Realtime] Connected')
-                setState(s => ({ ...s, isConnected: true }))
-                connectPromiseRef.current = null
-                resolve()
+                    ws.onopen = () => {
+                        console.log('[Realtime] Connected')
+                        setState(s => ({ ...s, isConnected: true }))
+                        resolve()
+                    }
+
+                    ws.onmessage = handleMessage
+
+                    ws.onclose = () => {
+                        console.log('[Realtime] Disconnected')
+                        setState(s => ({
+                            ...s,
+                            isConnected: false,
+                            isListening: false,
+                            isSpeaking: false
+                        }))
+                        cleanupAudio()
+
+                        // Only clear globals if this was the active connection
+                        if (globalWs === ws) {
+                            globalConnectPromise = null
+                            globalWs = null
+                            globalSessionId = null
+                            globalConnectionRefCount = 0
+                        }
+                        wsRef.current = null
+                        // If connection was pending, reject it
+                        reject(new Error('WebSocket closed'))
+                    }
+
+                    ws.onerror = (e) => {
+                        console.error('[Realtime] WebSocket error:', e)
+                        optionsRef.current.onError?.('WebSocket connection failed')
+                        if (globalWs === ws) {
+                            globalConnectPromise = null
+                            globalWs = null
+                            globalSessionId = null
+                            globalConnectionRefCount = 0
+                        }
+                        wsRef.current = null
+                        reject(new Error('WebSocket connection failed'))
+                    }
+                })
+            } catch (e) {
+                // Determine if we should clear the global promise
+                // If we failed, we probably should so next attempt can try again
+                if (globalSessionId === sessionId) {
+                    globalConnectPromise = null
+                    globalWs = null
+                    globalSessionId = null
+                }
+                throw e
             }
+        })()
 
-            ws.onmessage = handleMessage
-
-            ws.onclose = () => {
-                console.log('[Realtime] Disconnected')
-                setState(s => ({
-                    ...s,
-                    isConnected: false,
-                    isListening: false,
-                    isSpeaking: false
-                }))
-                cleanupAudio()
-                connectPromiseRef.current = null
-                // If connection was pending, reject it
-                reject(new Error('WebSocket closed'))
-            }
-
-            ws.onerror = (e) => {
-                console.error('[Realtime] WebSocket error:', e)
-                options.onError?.('WebSocket connection failed')
-                connectPromiseRef.current = null
-                reject(new Error('WebSocket connection failed'))
-            }
-        })
-
-        return connectPromiseRef.current
-    }, [handleMessage, initAudioContext, cleanupAudio, options])
+        return globalConnectPromise
+    }, [handleMessage, initAudioContext, cleanupAudio])
 
     // Disconnect from realtime session
     const disconnect = useCallback(() => {
         stopListening()
-        if (wsRef.current) {
-            wsRef.current.close()
-            wsRef.current = null
+
+
+        globalConnectionRefCount--
+        console.log('[Realtime] Disconnect called, refCount:', globalConnectionRefCount)
+
+        if (globalConnectionRefCount <= 0) {
+            console.log('[Realtime] RefCount 0, closing WebSocket')
+            if (globalWs) {
+                globalWs.close()
+                globalWs = null
+            }
+            globalSessionId = null
+            globalConnectPromise = null
+            globalConnectionRefCount = 0
+        } else {
+            console.log('[Realtime] RefCount > 0, keeping WebSocket open')
         }
+
+        wsRef.current = null
         sessionIdRef.current = null
-        connectPromiseRef.current = null
+
         setState({
             isConnected: false,
             isListening: false,
@@ -353,9 +498,9 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
     // Start listening (capture microphone)
     const startListening = useCallback(async () => {
         // If connecting, wait for it
-        if (connectPromiseRef.current) {
+        if (globalConnectPromise) {
             try {
-                await connectPromiseRef.current
+                await globalConnectPromise
             } catch (e) {
                 console.error('Connection failed while waiting to start listening')
                 return false
@@ -460,10 +605,10 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
             } else if (e instanceof Error) {
                 msg = `Microphone Error: ${e.message}`
             }
-            options.onError?.(msg)
+            optionsRef.current.onError?.(msg)
             return false
         }
-    }, [float32ToPcm16Base64, initAudioContext, options, resampleTo24k])
+    }, [float32ToPcm16Base64, initAudioContext, resampleTo24k])
 
     // Send task result back to OpenAI
     const sendTaskResult = useCallback((callId: string, result: string) => {
@@ -474,6 +619,28 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
                 result
             }))
         }
+    }, [])
+
+    // Send text message through Realtime API (unified pipeline)
+    const sendTextMessage = useCallback(async (text: string): Promise<boolean> => {
+        // Wait for any pending connection
+        if (globalConnectPromise) {
+            try {
+                await globalConnectPromise
+            } catch (e) {
+                console.error('[Realtime] Connection failed while waiting to send message')
+                return false
+            }
+        }
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+                type: 'text',
+                content: text
+            }))
+            return true
+        }
+        return false
     }, [])
 
     // Cleanup on unmount
@@ -500,6 +667,7 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
         disconnect,
         startListening,
         stopListening,
-        sendTaskResult
+        sendTaskResult,
+        sendTextMessage
     }
 }
