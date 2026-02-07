@@ -2,6 +2,9 @@ import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
+import { spawn, ChildProcess } from 'child_process'
+
+let backendProcess: ChildProcess | null = null
 
 function createWindow(): void {
   // Grant microphone permissions so MediaRecorder works
@@ -60,6 +63,32 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  // Spawn backend in production
+  if (app.isPackaged) {
+    const backendPath = join(process.resourcesPath, 'surf-backend')
+    console.log('Spawning backend from:', backendPath)
+    backendProcess = spawn(backendPath, [], {
+      stdio: 'pipe',
+      env: { ...process.env, PYTHONUNBUFFERED: '1' } // Ensure capturing output
+    })
+
+    if (backendProcess.stdout) {
+      backendProcess.stdout.on('data', (data) => {
+        console.log(`[Backend]: ${data}`)
+      })
+    }
+
+    if (backendProcess.stderr) {
+      backendProcess.stderr.on('data', (data) => {
+        console.error(`[Backend Error]: ${data}`)
+      })
+    }
+
+    backendProcess.on('close', (code) => {
+      console.log(`Backend process exited with code ${code}`)
+    })
+  }
+
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
@@ -71,5 +100,12 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
+  }
+})
+
+app.on('before-quit', () => {
+  if (backendProcess) {
+    backendProcess.kill()
+    backendProcess = null
   }
 })

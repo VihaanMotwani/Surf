@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:a11y": "vitest run --config vitest.a11y.config.ts",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "build:backend": "cd backend && uv run python build_backend.py"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^3.0.0",
@@ -77,8 +78,13 @@
       "output": "dist"
     },
     "files": [
-      "dist-electron/**/*",
-      "dist/**/*"
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/surf-backend",
+        "to": "surf-backend"
+      }
     ],
     "mac": {
       "category": "public.app-category.productivity",
@@ -88,7 +94,9 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "icon": "build/icon.png",
+      "identity": null
     },
     "win": {
       "target": [
