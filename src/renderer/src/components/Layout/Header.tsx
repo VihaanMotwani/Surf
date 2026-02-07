@@ -1,5 +1,3 @@
-import { Settings } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { AccessibilityControls } from '@/components/AccessibilityControls/AccessibilityControls'
 import { useUIStore } from '@/store/ui'
 
@@ -23,15 +21,6 @@ export function Header() {
 
       <div className="flex items-center gap-2">
         <AccessibilityControls />
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground"
-          aria-label="Open settings"
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
       </div>
     </header>
   )

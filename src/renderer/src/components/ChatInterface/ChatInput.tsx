@@ -19,23 +19,23 @@ export function ChatInput() {
   // Realtime voice hook
   const realtime = useRealtime({
     onUserTranscript: (text, order) => {
-      // Add user message when transcription is complete
-      // Use local sequencing (store handles seq) to prevent jumbling on reconnect
+      // Use backend order as seq so user message sorts before the assistant reply
       addMessage({
         id: `user-${Date.now()}`,
         role: 'user',
         content: text,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        seq: order
       })
     },
     onAssistantTranscript: (text, order) => {
-      // Add assistant message
-      // Use local sequencing (store handles seq) to prevent jumbling on reconnect
+      // Use backend order as seq — always higher than the preceding user message
       addMessage({
         id: `assistant-realtime-${Date.now()}`,
         role: 'assistant',
         content: text,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        seq: order
       })
     },
     onTaskRequested: async (task) => {
