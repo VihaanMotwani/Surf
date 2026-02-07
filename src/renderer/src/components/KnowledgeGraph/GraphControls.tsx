@@ -20,7 +20,7 @@ export function GraphControls() {
 
     setIsSearching(true)
     try {
-      const results = await electron.searchGraph(searchQuery)
+      const results = await electron.searchGraph(searchQuery) as { nodes?: any[]; message?: string }
 
       if (results.nodes && results.nodes.length > 0) {
         setSearchResults(results.nodes)

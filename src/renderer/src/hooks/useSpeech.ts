@@ -1,80 +1,125 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useSettingsStore } from '@/store/settings'
+
+const BACKEND_URL = 'http://127.0.0.1:8000'
+
+// OpenAI TTS voices
+export const OPENAI_VOICES = [
+  { name: 'alloy', description: 'Neutral and balanced voice' },
+  { name: 'echo', description: 'Male voice with good clarity' },
+  { name: 'fable', description: 'British accent, expressive' },
+  { name: 'onyx', description: 'Deep, authoritative male voice' },
+  { name: 'nova', description: 'Warm and engaging female voice' },
+  { name: 'shimmer', description: 'Bright and energetic female voice' }
+]
 
 export function useSpeech() {
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const queueRef = useRef<string[]>([])
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const settings = useSettingsStore()
 
-  // Load available voices
+  // Cleanup on unmount
   useEffect(() => {
-    const loadVoices = () => {
-      const availableVoices = window.speechSynthesis.getVoices()
-      setVoices(availableVoices)
-    }
-
-    loadVoices()
-    window.speechSynthesis.onvoiceschanged = loadVoices
-
     return () => {
-      window.speechSynthesis.onvoiceschanged = null
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
     }
   }, [])
 
   const speak = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (!text) return
 
-      // Cancel any ongoing speech
-      window.speechSynthesis.cancel()
+      // Stop any ongoing speech
+      stop()
 
-      const utterance = new SpeechSynthesisUtterance(text)
-      utteranceRef.current = utterance
+      setIsSpeaking(true)
+      abortControllerRef.current = new AbortController()
 
-      // Apply settings
-      utterance.rate = settings.speechRate
-      utterance.pitch = settings.speechPitch
-      utterance.volume = settings.speechVolume
-
-      // Set voice if selected
-      if (settings.selectedVoice) {
-        const voice = voices.find((v) => v.name === settings.selectedVoice)
-        if (voice) {
-          utterance.voice = voice
+      try {
+        const requestBody = {
+          text,
+          voice: settings.selectedVoice || 'nova',
+          model: settings.ttsModel || 'tts-1',
+          speed: settings.speechSpeed || 1.0
         }
-      }
 
-      utterance.onstart = () => setIsSpeaking(true)
-      utterance.onend = () => {
+        console.log('TTS request:', requestBody)
+
+        // Call backend TTS API
+        const response = await fetch(`${BACKEND_URL}/speech/synthesize`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+          signal: abortControllerRef.current.signal
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('TTS error response:', errorText)
+          throw new Error(`TTS failed: ${response.statusText}`)
+        }
+
+        // Get audio blob
+        const audioBlob = await response.blob()
+        const audioUrl = URL.createObjectURL(audioBlob)
+
+        // Create and play audio
+        const audio = new Audio(audioUrl)
+        audioRef.current = audio
+
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl)
+          setIsSpeaking(false)
+
+          // Process next item in queue
+          if (queueRef.current.length > 0) {
+            const next = queueRef.current.shift()
+            if (next) speak(next)
+          }
+        }
+
+        audio.onerror = () => {
+          URL.revokeObjectURL(audioUrl)
+          setIsSpeaking(false)
+          console.error('Audio playback error')
+        }
+
+        await audio.play()
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          // Intentional abort, not an error
+          return
+        }
+        console.error('TTS error:', error)
         setIsSpeaking(false)
-        // Process next item in queue
-        if (queueRef.current.length > 0) {
-          const next = queueRef.current.shift()
-          if (next) speak(next)
-        }
       }
-      utterance.onerror = () => setIsSpeaking(false)
-
-      window.speechSynthesis.speak(utterance)
     },
-    [settings, voices]
+    [settings.selectedVoice, settings.ttsModel, settings.speechSpeed]
   )
 
   const stop = useCallback(() => {
-    window.speechSynthesis.cancel()
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
     queueRef.current = []
     setIsSpeaking(false)
-  }, [])
-
-  const pause = useCallback(() => {
-    window.speechSynthesis.pause()
-  }, [])
-
-  const resume = useCallback(() => {
-    window.speechSynthesis.resume()
   }, [])
 
   const addToQueue = useCallback((text: string) => {
@@ -88,11 +133,9 @@ export function useSpeech() {
   return {
     speak,
     stop,
-    pause,
-    resume,
     addToQueue,
     isSpeaking,
-    voices
+    voices: OPENAI_VOICES
   }
 }
 

@@ -75,7 +75,7 @@ export function GraphVisualization() {
         if (nodeData) {
           setSelectedNode(nodeData)
           // Highlight selected node
-          graph.forEachNode((n) => {
+          graph.forEachNode((n: string) => {
             graph.setNodeAttribute(n, 'size', graphData.nodes.find(nd => nd.id === n)?.size || 15)
           })
           graph.setNodeAttribute(node, 'size', 25)

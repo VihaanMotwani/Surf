@@ -6,12 +6,11 @@ import { Separator } from '@/components/ui/separator'
 import * as Popover from '@radix-ui/react-popover'
 import { useSettingsStore } from '@/store/settings'
 import { useIPC } from '@/hooks/useIPC'
-import { useSpeech } from '@/hooks/useSpeech'
+import { OPENAI_VOICES } from '@/hooks/useSpeech'
 
 export function AccessibilityControls() {
   const settings = useSettingsStore()
   const electron = useIPC()
-  const { voices: _voices } = useSpeech()
 
   const updateSettings = async (updates: Partial<typeof settings>) => {
     settings.updateSettings(updates)
@@ -123,67 +122,58 @@ export function AccessibilityControls() {
             align="end"
           >
             <div className="space-y-4">
-              <h3 className="font-medium">Speech Settings</h3>
+              <h3 className="font-medium">Speech Settings (OpenAI TTS)</h3>
 
               <div>
-                <label htmlFor="speech-rate" className="text-sm mb-2 block">
+                <label htmlFor="voice-select" className="text-sm mb-2 block">
+                  Voice
+                </label>
+                <select
+                  id="voice-select"
+                  value={settings.selectedVoice}
+                  onChange={(e) => updateSettings({ selectedVoice: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {OPENAI_VOICES.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} - {voice.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="tts-model" className="text-sm mb-2 block">
+                  Quality
+                </label>
+                <select
+                  id="tts-model"
+                  value={settings.ttsModel}
+                  onChange={(e) => updateSettings({ ttsModel: e.target.value as 'tts-1' | 'tts-1-hd' })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="tts-1">Standard (faster)</option>
+                  <option value="tts-1-hd">HD (higher quality)</option>
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="speech-speed" className="text-sm mb-2 block">
                   Speed
                 </label>
                 <div className="flex items-center space-x-4">
                   <Slider
-                    id="speech-rate"
-                    value={[settings.speechRate]}
-                    onValueChange={([value]) => updateSettings({ speechRate: value })}
-                    min={0.5}
-                    max={2}
-                    step={0.1}
-                    aria-label="Speech rate"
+                    id="speech-speed"
+                    value={[settings.speechSpeed]}
+                    onValueChange={([value]) => updateSettings({ speechSpeed: value })}
+                    min={0.25}
+                    max={4}
+                    step={0.25}
+                    aria-label="Speech speed"
                     className="flex-1"
                   />
                   <span className="w-12 text-sm text-muted-foreground">
-                    {settings.speechRate.toFixed(1)}x
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="speech-pitch" className="text-sm mb-2 block">
-                  Pitch
-                </label>
-                <div className="flex items-center space-x-4">
-                  <Slider
-                    id="speech-pitch"
-                    value={[settings.speechPitch]}
-                    onValueChange={([value]) => updateSettings({ speechPitch: value })}
-                    min={0.5}
-                    max={2}
-                    step={0.1}
-                    aria-label="Speech pitch"
-                    className="flex-1"
-                  />
-                  <span className="w-12 text-sm text-muted-foreground">
-                    {settings.speechPitch.toFixed(1)}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="speech-volume" className="text-sm mb-2 block">
-                  Volume
-                </label>
-                <div className="flex items-center space-x-4">
-                  <Slider
-                    id="speech-volume"
-                    value={[settings.speechVolume]}
-                    onValueChange={([value]) => updateSettings({ speechVolume: value })}
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    aria-label="Speech volume"
-                    className="flex-1"
-                  />
-                  <span className="w-12 text-sm text-muted-foreground">
-                    {Math.round(settings.speechVolume * 100)}%
+                    {settings.speechSpeed.toFixed(2)}x
                   </span>
                 </div>
               </div>

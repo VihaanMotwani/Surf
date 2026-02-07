@@ -49,10 +49,9 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'high-contrast'
   textScale: number
   reducedMotion: boolean
-  speechRate: number
-  speechPitch: number
-  speechVolume: number
-  selectedVoice: string | null
+  speechSpeed: number // OpenAI TTS speed (0.25 to 4.0)
+  selectedVoice: string // OpenAI voice: alloy, echo, fable, onyx, nova, shimmer
+  ttsModel: 'tts-1' | 'tts-1-hd' // OpenAI TTS model
   autoSpeak: boolean
 }
 

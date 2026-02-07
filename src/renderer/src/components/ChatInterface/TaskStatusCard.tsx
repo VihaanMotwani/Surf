@@ -86,7 +86,6 @@ export function TaskStatusCard({ taskStatus, taskResult, taskSteps }: TaskStatus
 
   if (taskStatus === 'succeeded') {
     const finalResult = taskResult?.final_result as string | undefined
-    const urls = taskResult?.urls as string[] | undefined
 
     return (
       <Card className="mt-2 border-border/50 bg-muted/50">

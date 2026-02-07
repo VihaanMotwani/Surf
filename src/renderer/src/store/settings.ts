@@ -9,10 +9,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   theme: 'light',
   textScale: 1,
   reducedMotion: false,
-  speechRate: 1.1,  // Slightly faster for more natural flow
-  speechPitch: 1,
-  speechVolume: 1,
-  selectedVoice: 'Samantha',  // Default to Samantha (most natural macOS voice)
+  speechSpeed: 1.0,  // OpenAI TTS speed (0.25 to 4.0, default 1.0)
+  selectedVoice: 'nova',  // Default OpenAI voice
+  ttsModel: 'tts-1',  // Use faster model by default
   autoSpeak: true,
 
   updateSettings: (updates) =>
