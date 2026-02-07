@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -7,6 +8,12 @@ from app.config import settings
 from app.db import AsyncSessionLocal
 from app.models import Artifact, Session, Task, TaskEvent
 from worker.runner import run_browser_use_task, summarize_history, to_jsonable
+
+logger = logging.getLogger(__name__)
+
+# Track browser instances per session to reuse across tasks
+_session_browsers = {}  # session_id -> browser
+_session_browser_context = {}  # session_id -> last browser state info
 
 
 async def claim_task():
@@ -92,6 +99,7 @@ async def finalize_task_failure(task_id, session_id, error_message: str):
 
 
 async def worker_loop():
+    global _session_browsers
     while True:
         claimed = await claim_task()
         if not claimed:
@@ -99,11 +107,66 @@ async def worker_loop():
             continue
 
         task_id, prompt, session_id = claimed
+
+        # Reuse or create browser for this session
+        browser = _session_browsers.get(session_id)
+        if browser is None:
+            try:
+                from browser_use import Browser
+                browser = Browser(keep_alive=True)  # Prevent agent from closing the browser
+                await browser.start()
+                _session_browsers[session_id] = browser
+                logger.info(f"Worker: Created new browser for session {session_id}")
+            except Exception as exc:
+                logger.exception("Worker: Failed to start browser for session %s", session_id)
+                await finalize_task_failure(task_id, session_id, f"Failed to start browser: {exc}")
+                continue
+        else:
+            logger.info(f"Worker: Reusing browser for session {session_id}")
+
         try:
-            history = await run_browser_use_task(prompt)
+            # Get previous browser context for this session
+            previous_context = _session_browser_context.get(session_id, "")
+
+            # Enrich prompt with browser context if this is a follow-up task
+            enriched_prompt = prompt
+            if previous_context:
+                enriched_prompt = f"{previous_context}\n\n---\nNEW TASK: {prompt}"
+                logger.info(f"Worker: Enriched task with previous browser context for session {session_id}")
+
+            history = await run_browser_use_task(enriched_prompt, browser=browser)  # Pass browser to reuse it
+
+            # Store browser context for next task in this session
+            if history:
+                try:
+                    # Get current page state
+                    pages = await browser.get_pages()
+                    if pages:
+                        page = pages[-1]
+                        current_url = page.url if hasattr(page, 'url') else "unknown"
+                        context = f"BROWSER CONTEXT: You are continuing work in a browser that is still open.\nCurrent URL: {current_url}\nPrevious task result: {history.final_result()}"
+                        _session_browser_context[session_id] = context
+                except Exception as e:
+                    logger.warning(f"Worker: Failed to capture browser context: {e}")
+
             await finalize_task_success(task_id, session_id, history)
         except Exception as exc:
+            logger.exception("Worker: Task %s failed", task_id)
             await finalize_task_failure(task_id, session_id, str(exc))
+        # Don't close browser here - keep it alive for next task in same session
+
+
+async def close_session_browser_worker(session_id: str):
+    """Close and cleanup browser when session is deleted or ended (worker version)."""
+    global _session_browsers, _session_browser_context
+    browser = _session_browsers.pop(session_id, None)
+    _session_browser_context.pop(session_id, None)  # Also clear context
+    if browser:
+        try:
+            await browser.stop()
+            logger.info(f"Worker: Closed browser for session {session_id}")
+        except Exception as exc:
+            logger.warning(f"Worker: Failed to close browser for session {session_id}: {exc}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import logging
 from datetime import datetime, timezone
 
@@ -12,21 +11,41 @@ logger = logging.getLogger(__name__)
 # Track active browser instance for screenshot capture
 _active_browser = None
 
+# Track browser instances per session to reuse across tasks
+_session_browsers = {}  # session_id -> browser
+_session_browser_context = {}  # session_id -> last browser state info
 
-async def capture_screenshot_b64() -> str | None:
+
+async def capture_screenshot_b64(session_id: str | None = None) -> str | None:
     """Capture a screenshot from the active browser, or return the latest artifact screenshot."""
-    global _active_browser
+    global _active_browser, _session_browsers
+
+    # First try: currently active browser (task is running)
     if _active_browser is not None:
         try:
             pages = await _active_browser.get_pages()
             if pages:
                 page = pages[-1]
-                screenshot_bytes = await page.screenshot()
-                return base64.b64encode(screenshot_bytes).decode("utf-8")
-        except Exception:
-            logger.warning("Failed to capture screenshot from active browser")
+                screenshot_b64 = await page.screenshot()  # Already returns base64 string
+                return screenshot_b64
+        except Exception as exc:
+            logger.warning(f"Failed to capture screenshot from active browser: {exc}")
 
-    # Fallback: get most recent screenshot artifact from DB
+    # Second try: browser for this session (browser is open but task finished)
+    if session_id:
+        browser = _session_browsers.get(session_id)
+        if browser is not None:
+            try:
+                pages = await browser.get_pages()
+                if pages:
+                    page = pages[-1]
+                    screenshot_b64 = await page.screenshot()  # Already returns base64 string
+                    logger.info(f"Captured screenshot from session browser {session_id}")
+                    return screenshot_b64
+            except Exception as exc:
+                logger.warning(f"Failed to capture screenshot from session browser {session_id}: {exc}")
+
+    # Third try: get most recent screenshot artifact from DB
     from sqlalchemy import select
     async with AsyncSessionLocal() as db:
         stmt = (
@@ -110,23 +129,74 @@ async def execute_task_background(task_id: str, session_id: str, prompt: str):
                 task.started_at = datetime.now(timezone.utc)
                 db.add(TaskEvent(task_id=task_id, type="status", payload={"status": "running"}))
 
-    global _active_browser
-    try:
-        from browser_use import Browser
-        browser = Browser()
-        await browser.start()
-        _active_browser = browser
+    global _active_browser, _session_browsers
+
+    # Reuse or create browser for this session
+    browser = _session_browsers.get(session_id)
+    if browser is None:
         try:
-            history = await run_browser_use_task(
-                prompt,
-                browser=browser,
-                on_step_callback=lambda step_data: asyncio.create_task(_emit_event(task_id, "step", step_data))
-            )
-            await _finalize_success(task_id, session_id, history)
-        finally:
-            _active_browser = None
-            await browser.stop()
+            from browser_use import Browser
+            browser = Browser(keep_alive=True)  # Prevent agent from closing the browser
+            await browser.start()
+            _session_browsers[session_id] = browser
+            logger.info(f"Created new browser for session {session_id}")
+        except Exception as exc:
+            logger.exception("Failed to start browser for session %s", session_id)
+            await _finalize_failure(task_id, session_id, f"Failed to start browser: {exc}")
+            return
+    else:
+        logger.info(f"Reusing browser for session {session_id}")
+
+    _active_browser = browser
+    try:
+        # Get previous browser context for this session
+        previous_context = _session_browser_context.get(session_id, "")
+
+        # Enrich prompt with browser context if this is a follow-up task
+        enriched_prompt = prompt
+        if previous_context:
+            enriched_prompt = f"{previous_context}\n\n---\nNEW TASK: {prompt}"
+            logger.info(f"Enriched task with previous browser context for session {session_id}")
+
+        logger.info(f"Executing task {task_id} with browser for session {session_id}")
+        history = await run_browser_use_task(
+            enriched_prompt,
+            browser=browser,  # Pass existing browser to reuse it
+            on_step_callback=lambda step_data: asyncio.create_task(_emit_event(task_id, "step", step_data))
+        )
+
+        # Store browser context for next task in this session
+        if history:
+            try:
+                # Get current page state
+                pages = await browser.get_pages()
+                if pages:
+                    page = pages[-1]
+                    current_url = page.url if hasattr(page, 'url') else "unknown"
+                    context = f"BROWSER CONTEXT: You are continuing work in a browser that is still open.\nCurrent URL: {current_url}\nPrevious task result: {history.final_result()}"
+                    _session_browser_context[session_id] = context
+            except Exception as e:
+                logger.warning(f"Failed to capture browser context: {e}")
+
+        logger.info(f"Task {task_id} completed successfully, browser remains alive for session {session_id}")
+        await _finalize_success(task_id, session_id, history)
     except Exception as exc:
-        _active_browser = None
         logger.exception("Task %s failed", task_id)
         await _finalize_failure(task_id, session_id, str(exc))
+    finally:
+        _active_browser = None
+        # Don't close browser here - keep it alive for next task in same session
+        logger.info(f"Browser for session {session_id} kept alive (total sessions: {len(_session_browsers)})")
+
+
+async def close_session_browser(session_id: str):
+    """Close and cleanup browser when session is deleted or ended."""
+    global _session_browsers, _session_browser_context
+    browser = _session_browsers.pop(session_id, None)
+    _session_browser_context.pop(session_id, None)  # Also clear context
+    if browser:
+        try:
+            await browser.stop()
+            logger.info(f"Closed browser for session {session_id}")
+        except Exception as exc:
+            logger.warning(f"Failed to close browser for session {session_id}: {exc}")

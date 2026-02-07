@@ -48,6 +48,18 @@ async def delete_session(db: AsyncSession, session_id: str) -> bool:
     session = await get_session(db, session_id)
     if not session:
         return False
+
+    # Close the browser for this session in both execution paths
+    from app.task_executor import close_session_browser
+    await close_session_browser(session_id)
+
+    # Also try to close worker browser if it exists
+    try:
+        from worker.worker import close_session_browser_worker
+        await close_session_browser_worker(session_id)
+    except Exception:
+        pass  # Worker might not be running or imported
+
     await db.delete(session)
     await db.commit()
     return True

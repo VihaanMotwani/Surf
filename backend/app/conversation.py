@@ -57,7 +57,12 @@ async def handle_user_message(db: AsyncSession, session: Session, content: str) 
     # Fetch memory context for LLM enrichment (always include local facts)
     local_ctx = await get_local_memory_context()
     zep_ctx = zep.get_context() if zep else ""
-    memory_context = "\n\n".join(filter(None, [zep_ctx, local_ctx]))
+
+    # Add browser session context if a browser is open for this session
+    from app.task_executor import _session_browser_context
+    browser_ctx = _session_browser_context.get(str(session.id), "")
+
+    memory_context = "\n\n".join(filter(None, [zep_ctx, local_ctx, browser_ctx]))
 
     messages = await list_messages(db, session.id)
     try:

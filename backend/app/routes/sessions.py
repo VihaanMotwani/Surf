@@ -226,7 +226,7 @@ async def add_message_stream_endpoint(
         from app.task_executor import capture_screenshot_b64
 
         async def describe_stream():
-            screenshot = await capture_screenshot_b64()
+            screenshot = await capture_screenshot_b64(session_id=str(session_id))
             if not screenshot:
                 no_screen_msg = "I don't have a browser screen to describe right now. Start a browser task first, then ask me to describe what I see."
                 yield f"data: {json.dumps({'type': 'delta', 'text': no_screen_msg})}\n\n"
@@ -475,7 +475,7 @@ async def add_audio_message_stream_endpoint(
         async def describe_audio_stream():
             yield f"data: {json.dumps({'type': 'transcription', 'text': transcription})}\n\n"
 
-            screenshot = await capture_screenshot_b64()
+            screenshot = await capture_screenshot_b64(session_id=str(session_id))
             if not screenshot:
                 no_screen_msg = "I don't have a browser screen to describe right now. Start a browser task first, then ask me to describe what I see."
                 yield f"data: {json.dumps({'type': 'delta', 'text': no_screen_msg})}\n\n"
