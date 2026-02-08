@@ -22,7 +22,7 @@ let settings: AppSettings = {
   speechRate: 1,
   speechPitch: 1,
   speechVolume: 1,
-  selectedVoice: null,
+  selectedVoice: 'alloy',  // Default voice for Realtime API
   autoSpeak: true
 }
 

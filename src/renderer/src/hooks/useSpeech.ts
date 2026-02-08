@@ -3,14 +3,16 @@ import { useSettingsStore } from '@/store/settings'
 
 const BACKEND_URL = 'http://127.0.0.1:8000'
 
-// OpenAI TTS voices
+// OpenAI Realtime API voices (different from TTS API voices)
 export const OPENAI_VOICES = [
   { name: 'alloy', description: 'Neutral and balanced voice' },
-  { name: 'echo', description: 'Male voice with good clarity' },
-  { name: 'fable', description: 'British accent, expressive' },
-  { name: 'onyx', description: 'Deep, authoritative male voice' },
-  { name: 'nova', description: 'Warm and engaging female voice' },
-  { name: 'shimmer', description: 'Bright and energetic female voice' }
+  { name: 'ash', description: 'Warm, conversational voice' },
+  { name: 'ballad', description: 'Expressive, storytelling voice' },
+  { name: 'coral', description: 'Friendly and engaging voice' },
+  { name: 'echo', description: 'Clear, articulate voice' },
+  { name: 'sage', description: 'Calm and thoughtful voice' },
+  { name: 'shimmer', description: 'Bright and energetic voice' },
+  { name: 'verse', description: 'Dynamic and versatile voice' }
 ]
 
 export function useSpeech() {
@@ -204,6 +206,6 @@ export function useSpeechRecognition() {
   const [isListening] = useState(false)
   const [transcript] = useState('')
   const start = useCallback(async () => ({ success: false, error: 'Use useAudioRecorder instead' }), [])
-  const stop = useCallback(() => {}, [])
+  const stop = useCallback(() => { }, [])
   return { start, stop, isListening, transcript }
 }

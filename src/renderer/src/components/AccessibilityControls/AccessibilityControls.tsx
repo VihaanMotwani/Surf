@@ -122,11 +122,11 @@ export function AccessibilityControls() {
             align="end"
           >
             <div className="space-y-4">
-              <h3 className="font-medium">Speech Settings (OpenAI TTS)</h3>
+              <h3 className="font-medium">Voice Settings</h3>
 
               <div>
                 <label htmlFor="voice-select" className="text-sm mb-2 block">
-                  Voice
+                  Voice (Realtime)
                 </label>
                 <select
                   id="voice-select"
@@ -140,7 +140,13 @@ export function AccessibilityControls() {
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Change applies to new chats. Start a new chat to hear the new voice.
+                </p>
               </div>
+
+              <Separator />
+              <p className="text-xs text-muted-foreground">Legacy playback settings (for older messages)</p>
 
               <div>
                 <label htmlFor="tts-model" className="text-sm mb-2 block">

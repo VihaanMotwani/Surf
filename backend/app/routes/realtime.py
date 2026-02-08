@@ -33,9 +33,10 @@ REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-previ
 class RealtimeSession:
     """Manages a single realtime session between client and OpenAI."""
 
-    def __init__(self, client_ws: WebSocket, session_id: str):
+    def __init__(self, client_ws: WebSocket, session_id: str, voice: str = "alloy"):
         self.client_ws = client_ws
         self.session_id = session_id
+        self.voice = voice  # User's selected voice
         self.openai_ws: Optional[websockets.WebSocketClientProtocol] = None
         self.is_running = False
         self.memory: Optional[ZepMemory] = None
@@ -173,7 +174,7 @@ class RealtimeSession:
             "session": {
                 "modalities": ["text", "audio"],
                 "instructions": self._build_system_prompt(),
-                "voice": "alloy",
+                "voice": self.voice,
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
                 "input_audio_transcription": {
@@ -617,9 +618,12 @@ class RealtimeSession:
 
 
 @router.websocket("/session/{session_id}")
-async def realtime_session(websocket: WebSocket, session_id: str):
+async def realtime_session(websocket: WebSocket, session_id: str, voice: str = "alloy"):
     """
     WebSocket endpoint for realtime voice sessions.
+
+    Query Parameters:
+    - voice: OpenAI voice to use (alloy, echo, fable, onyx, nova, shimmer). Default: alloy
 
     The client sends:
     - {"type": "audio", "data": "<base64 PCM16 audio>"}
@@ -639,7 +643,7 @@ async def realtime_session(websocket: WebSocket, session_id: str):
     await websocket.accept()
     logger.info(f"Client connected for realtime session {session_id}")
 
-    session = RealtimeSession(websocket, session_id)
+    session = RealtimeSession(websocket, session_id, voice=voice)
 
     try:
         await session.run()

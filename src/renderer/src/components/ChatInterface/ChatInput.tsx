@@ -3,6 +3,7 @@ import { Send, Mic, Square, Loader2, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useChatStore } from '@/store/chat'
+import { useSettingsStore } from '@/store/settings'
 import { useIPC } from '@/hooks/useIPC'
 import { useRealtime } from '@/hooks/useRealtime'
 import { useToast } from '@/components/ui/use-toast'
@@ -14,6 +15,7 @@ export function ChatInput() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const electron = useIPC()
   const { sessionId, isLoading, addMessage, setLoading } = useChatStore()
+  const { selectedVoice } = useSettingsStore()
   const { toast } = useToast()
   const { announce } = useScreenReaderAnnounce()
 
@@ -80,11 +82,11 @@ export function ChatInput() {
   // Always call connect when sessionId changes - connect() handles session switching internally
   useEffect(() => {
     if (sessionId) {
-      realtime.connect(sessionId)
+      realtime.connect(sessionId, selectedVoice || 'alloy')
     }
     // Don't disconnect on cleanup - let the WebSocket handle its own lifecycle
     // Disconnecting here causes race conditions with component re-renders
-  }, [sessionId, realtime.connect])
+  }, [sessionId, selectedVoice, realtime.connect])
 
   const handleSend = async () => {
     const trimmedInput = input.trim()
@@ -97,7 +99,7 @@ export function ChatInput() {
     // Always call connect to ensure we're connected to the CURRENT session
     // (connect handles session mismatch internally - if connected to wrong session, it reconnects)
     try {
-      await realtime.connect(sessionId)
+      await realtime.connect(sessionId, selectedVoice || 'alloy')
     } catch (error) {
       console.error('Failed to connect:', error)
       toast({
@@ -173,7 +175,7 @@ export function ChatInput() {
         // Make sure we're connected first
         if (!realtime.isConnected && sessionId) {
           console.log('[ChatInput] Connecting before starting voice...')
-          await realtime.connect(sessionId)
+          await realtime.connect(sessionId, selectedVoice || 'alloy')
           // Wait a moment for connection to establish
           await new Promise(resolve => setTimeout(resolve, 500))
         }

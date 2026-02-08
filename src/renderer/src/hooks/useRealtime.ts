@@ -334,12 +334,12 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
     const hasConnectedRef = useRef(false)
 
     // Connect to realtime session - uses module-level singleton
-    const connect = useCallback(async (sessionId: string) => {
+    const connect = useCallback(async (sessionId: string, voice: string = 'alloy') => {
         // Increment reference count ONLY if we haven't already for this instance
         if (!hasConnectedRef.current) {
             globalConnectionRefCount++
             hasConnectedRef.current = true
-            console.log('[Realtime] Connect called, refCount:', globalConnectionRefCount, 'SessionId:', sessionId)
+            console.log('[Realtime] Connect called, refCount:', globalConnectionRefCount, 'SessionId:', sessionId, 'Voice:', voice)
         } else {
             console.log('[Realtime] Connect called (already tracking), refCount:', globalConnectionRefCount, 'SessionId:', sessionId)
         }
@@ -383,7 +383,7 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
             return globalConnectPromise
         }
 
-        console.log('[Realtime] Connecting to session:', sessionId)
+        console.log('[Realtime] Connecting to session:', sessionId, 'with voice:', voice)
         globalSessionId = sessionId
         sessionIdRef.current = sessionId
 
@@ -398,9 +398,10 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
                     console.error('[Realtime] Failed to init audio context:', e)
                 }
 
-                // Create WebSocket using a new promise that resolves when open
+                // Create WebSocket with voice query parameter
                 await new Promise<void>((resolve, reject) => {
-                    const ws = new WebSocket(`${BACKEND_WS_URL}/realtime/session/${sessionId}`)
+                    const wsUrl = `${BACKEND_WS_URL}/realtime/session/${sessionId}?voice=${encodeURIComponent(voice)}`
+                    const ws = new WebSocket(wsUrl)
                     globalWs = ws
                     wsRef.current = ws
 
