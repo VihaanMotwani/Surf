@@ -647,20 +647,14 @@ export function useRealtime(options: UseRealtimeOptions = {}) {
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            cleanupAudio()
-            if (wsRef.current) {
-                // Prevent state updates by removing listeners before closing
-                wsRef.current.onclose = null
-                wsRef.current.onerror = null
-                wsRef.current.onmessage = null
-                wsRef.current.close()
-                wsRef.current = null
-            }
+            // Use disconnect() to respect ref counting instead of proper forcing close
+            disconnect()
+
             if (audioContextRef.current) {
                 audioContextRef.current.close()
             }
         }
-    }, [cleanupAudio])
+    }, [disconnect])
 
     return {
         ...state,

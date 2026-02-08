@@ -470,12 +470,11 @@ class RealtimeSession:
                 # Note: History injection now happens in _openai_to_client_loop
                 # after receiving session.updated (ensuring session is configured first)
 
-                # Run both loops concurrently
-                await asyncio.gather(
-                    self._openai_to_client_loop(),
-                    self._client_to_openai_loop(),
-                    return_exceptions=True
-                )
+                # Run both loops concurrently with TaskGroup for proper cancellation
+                # If one fails/returns, the other is cancelled immediately
+                async with asyncio.TaskGroup() as tg:
+                    tg.create_task(self._openai_to_client_loop())
+                    tg.create_task(self._client_to_openai_loop())
 
         except Exception as e:
             logger.error(f"Realtime session error: {e}")

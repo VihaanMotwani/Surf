@@ -30,6 +30,17 @@ export function GraphVisualization() {
       connectionCount[edge.target] = (connectionCount[edge.target] || 0) + 1
     })
 
+    // Node color palette
+    const nodeColors: Record<string, string> = {
+      user: '#FF6B6B',      // Coral Red
+      preference: '#4ECDC4', // Teal
+      website: '#45B7D1',    // Sky Blue
+      task: '#96CEB4',       // Sage Green
+      memory: '#FFEEAD',     // Pale Yellow
+      fact: '#D4A5A5',       // Pale Pink
+      default: theme === 'dark' ? '#888' : '#666'
+    }
+
     // Add nodes with size based on connections
     graphData.nodes.forEach((node, index) => {
       const angle = (index / graphData.nodes.length) * 2 * Math.PI
@@ -43,7 +54,7 @@ export function GraphVisualization() {
         x: Math.cos(angle) * radius + (Math.random() - 0.5) * 50,
         y: Math.sin(angle) * radius + (Math.random() - 0.5) * 50,
         size: nodeSize,
-        color: node.color || (theme === 'dark' ? '#888' : '#666'),
+        color: node.color || nodeColors[node.type] || nodeColors.default,
       })
     })
 
