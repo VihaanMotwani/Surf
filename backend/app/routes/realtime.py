@@ -104,7 +104,14 @@ class RealtimeSession:
         )
 
         if context:
-            return f"{base_prompt}\n\n--- USER CONTEXT ---\n{context}\n--- END CONTEXT ---"
+            return (
+                f"{base_prompt}\n\n"
+                f"--- USER CONTEXT (MEMORY) ---\n{context}\n--- END CONTEXT ---\n\n"
+                "IMPORTANT INSTRUCTION: The above context is for reference only (past preferences, facts, history). "
+                "If the user's current request conflicts with or is unrelated to the context, "
+                "PRIORITIZE THE CURRENT REQUEST. Do NOT assume the user wants to continue a past task (like applying for internships) "
+                "unless they explicitly ask for it."
+            )
 
         return base_prompt
 
