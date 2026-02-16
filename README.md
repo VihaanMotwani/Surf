@@ -2,7 +2,9 @@
 
 An accessibility-focused desktop application that empowers users with physical disabilities, visual impairments, or cognitive challenges to browse the web using natural speech. Surf combines voice-controlled browser automation, a persistent memory system, and a multimodal chat interface into a single Electron app.
 
-> **Demo video**: [Link to demo video] *(Replace with your actual video link)*
+> **Demo video**:
+
+https://github.com/user-attachments/assets/ea65908e-d17d-41f2-88ac-6389097bde8c
 
 ---
 
